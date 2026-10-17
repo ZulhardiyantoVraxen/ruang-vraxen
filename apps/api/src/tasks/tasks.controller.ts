@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Post } from "@nestjs/common";
 import { TasksService } from "./tasks.service";
 import { CreateTaskDto } from "./dto";
 
@@ -24,5 +24,11 @@ export class TasksController {
 
   @Post(":id/qa-passed") qaPassed(@Param("id") id: string) {
     return this.service.qaPassed(id);
+  }
+
+  /** Called by apps/worker once an executor agent finishes a task. */
+  @Patch(":id/result")
+  recordResult(@Param("id") id: string, @Body() body: { resultSummary: string; resultObjectKey?: string }) {
+    return this.service.recordResult(id, body.resultSummary, body.resultObjectKey);
   }
 }

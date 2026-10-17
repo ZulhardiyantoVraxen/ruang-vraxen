@@ -25,24 +25,40 @@ ini punya ketiganya.
 
 ```
 apps/
-  api/            Nest.js backend
+  api/            Nest.js backend (REST, pemilik semua business rule/state transition)
     src/
       divisions/      CRUD divisi + tambah role ke divisi yang sudah ada
       agents/         Provision agent, ubah status, switch model variant (FREE/PAID)
-      tasks/          Task + subtask paralel, assignment, loop QA<->Spesialis
+      tasks/          Task + subtask paralel, assignment, loop QA<->Spesialis, simpan hasil
       approvals/      Antrean & keputusan persetujuan manusia
-      model-routing/  OpenRouterService - satu pintu ke semua pemanggilan model
+      model-routing/  OpenRouterService - satu pintu ke semua pemanggilan model dari API
       orchestrator/   Alur onboarding divisi interaktif (lihat di bawah)
       usage/          Pencatatan token/biaya + cost cap per agent
       kafka/          Publisher event, satu topic per aggregate
       prisma/         Koneksi database
+  worker/         Task executor - Kafka CONSUMER, proses terpisah dari api (lihat di bawah)
   web/            Next.js frontend (office overview, wizard, task board, approval queue)
 packages/
   db/             Prisma schema - satu sumber kebenaran untuk seluruh model data
-  shared/         Definisi topic Kafka + tipe event, dipakai api & (nanti) consumer lain
+  shared/         Topic Kafka + tipe event + OpenRouterClient + ObjectStorageClient +
+                  resolveModel() - dipakai bersama oleh api & worker, tanpa duplikasi logic
 infra/
   docker-compose.yml   Postgres + Redis + Kafka (KRaft) + MinIO untuk dev lokal
 ```
+
+### Task executor (`apps/worker`)
+
+Proses Node terpisah dari `apps/api`, sengaja - supaya jumlah worker bisa discale naik/turun independen dari API (banyak task jalan bersamaan = perlu banyak worker; trafik dashboard tinggi tidak otomatis butuh lebih banyak worker, begitu juga sebaliknya).
+
+Alurnya:
+1. `TasksService.assign()` di API meng-assign agent ke task (role `EXECUTOR` atau `REVIEWER`) dan publish event `task.assigned` ke topic `task-events`.
+2. Worker consume event itu. Kalau role-nya `EXECUTOR`: ambil agent + role + divisi + task dari Postgres, `resolveModel()` tier role itu ke model OpenRouter yang tepat (lihat `packages/shared/src/model-routing.ts` - fungsi yang sama dipakai API untuk onboarding), lalu panggil model lewat `OpenRouterClient`.
+3. Output disimpan: ringkasan pendek di `Task.resultSummary`, teks lengkap ke Object Storage (MinIO lokal) lewat `ObjectStorageClient`, key-nya disimpan di `Task.resultObjectKey`. Pemakaian token dilaporkan ke `POST /usage` (di situ cost cap dicek, bukan di worker).
+4. Kalau task itu sudah punya agent dengan role `REVIEWER` ter-assign, worker langsung jalankan QA (`reviewerPrompt`, model dari role reviewer itu sendiri - bisa beda tier/model dari executor, sesuai aturan "QA pakai model berbeda dari pembuatnya"). Reviewer balas JSON `{"verdict":"PASS"|"FAIL","notes":"..."}`.
+5. `PASS` -> `POST /tasks/:id/qa-passed` (API yang putuskan lanjut ke `DONE` atau `APPROVAL_PENDING`, sesuai `Task.requiresApproval`). `FAIL` -> `POST /tasks/:id/qa-failed` (API yang naikkan `revisionCount` dan hentikan loop di `maxRevisions`, sesuai Catatan Penting di spreadsheet).
+6. Kalau task itu TIDAK punya reviewer ter-assign, output executor langsung dianggap final (`qa-passed` dipanggil langsung) - cocok untuk role tier `RUTIN` yang memang tidak perlu QA berlapis.
+
+Worker tidak pernah menulis langsung ke `Task`/`Approval`/`CostCap` - itu tetap wewenang `apps/api` (`TasksService`, `UsageService`). Worker hanya baca Postgres untuk konteks, dan menulis lewat endpoint API supaya semua aturan bisnis (batas revisi, cost cap, pembuatan Approval) tetap di satu tempat.
 
 ## Kenapa desainnya begini
 
@@ -126,13 +142,9 @@ baik versi gratis maupun berbayar.
 
 Ini scaffold struktural, bukan implementasi penuh. Yang sengaja belum dibangun:
 
-- **Task executor** — service yang benar-benar menjalankan pekerjaan agent (ambil task
-  `RUNNING`, panggil `OpenRouterService.chat()`, tulis hasil ke Object Storage, catat usage,
-  lempar ke QA). Saat ini endpoint `tasks` hanya mengubah state, belum mengeksekusi.
-- **Kafka consumer** — publisher sudah jalan (`KafkaService.publish`), tapi belum ada service
-  yang `consume` topic-topic itu untuk memicu langkah berikutnya (mis. task.assigned ->
-  jalankan agent). Ini jembatan antara "data berubah" dan "kerjaan beneran dilakukan".
-  Sengaja dipisah modulnya supaya scaling konsumer independen dari API.
+- **Pemilihan agent otomatis** — `POST /tasks/:id/assign` masih butuh `agentId` eksplisit.
+  Belum ada logic "pilih agent idle dengan role yang cocok, atau provision agent baru kalau
+  semuanya sibuk" - saat ini orchestrator/manusia yang menentukan siapa mengerjakan apa.
 - **Auth** — belum ada; semua endpoint terbuka. Perlu sebelum deploy ke luar localhost.
 - **3D/2D office view** — halaman `/` di web masih list sederhana, belum visualisasi seperti
   Ruang. Bisa ditambah setelah data dari API-nya stabil (three.js / react-three-fiber, sama

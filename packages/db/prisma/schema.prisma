@@ -165,6 +165,10 @@ model Task {
   revisionCount      Int         @default(0)     // QA <-> Spesialis loop counter
   maxRevisions       Int         @default(3)     // hard stop for the loop (Catatan Penting di sheet)
 
+  // Filled in by the worker (apps/worker) once an executor agent finishes.
+  resultSummary      String?     @db.Text  // short human-readable summary, fits in the UI directly
+  resultObjectKey    String?               // object-storage key for the full output (file, long text, code diff, dst)
+
   createdAt          DateTime    @default(now())
   updatedAt          DateTime    @updatedAt
 

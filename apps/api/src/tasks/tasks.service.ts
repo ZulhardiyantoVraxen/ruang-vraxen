@@ -46,6 +46,15 @@ export class TasksService {
     });
   }
 
+  
+  /** Worker calls this once an executor agent finishes - stores the output, keeps state transitions in TasksService. */
+  async recordResult(taskId: string, resultSummary: string, resultObjectKey?: string) {
+    return this.prisma.task.update({
+      where: { id: taskId },
+      data: { resultSummary, resultObjectKey, status: "REVIEW" },
+    });
+  }
+
   async assign(taskId: string, agentId: string, role: "EXECUTOR" | "REVIEWER") {
     const agent = await this.prisma.agent.findUniqueOrThrow({
       where: { id: agentId },

@@ -5,6 +5,7 @@
   "description": "Virtual company platform: dynamic divisions of AI agents, tiered model routing via OpenRouter, human-in-the-loop approvals",
   "scripts": {
     "dev:api": "pnpm --filter @platform/api dev",
+    "dev:worker": "pnpm --filter @platform/worker dev",
     "dev:web": "pnpm --filter @platform/web dev",
     "db:generate": "pnpm --filter @platform/db prisma generate",
     "db:migrate": "pnpm --filter @platform/db prisma migrate dev",
