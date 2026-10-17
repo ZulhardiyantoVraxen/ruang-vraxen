@@ -51,7 +51,7 @@ echo "==> Staging dist-only artifacts (pnpm deploy --prod inlines workspace deps
 pnpm --filter @platform/api deploy --prod --legacy "$STAGE_DIR/api"
 pnpm --filter @platform/worker deploy --prod --legacy "$STAGE_DIR/worker"
 
-mkdir -p "$STAGE_DIR/web"
+mkdir -p "$STAGE_DIR/web/.next"
 cp -r apps/web/.next/standalone/. "$STAGE_DIR/web/"
 cp -r apps/web/.next/static "$STAGE_DIR/web/.next/static"
 if [ -d apps/web/public ]; then
