@@ -6,12 +6,36 @@ import { OrbitControls, Html } from "@react-three/drei";
 import * as THREE from "three";
 import { Character, type Pose } from "./Character";
 import { Desk, Monitor, Chair, Whiteboard, Plant, Sofa, GameTable, PantryCounter } from "./Furniture";
-import { layoutFor, deskSlots, loungeAnchors, jitterDisc, ROW_LOUNGE, type RoomRect } from "./roomLayout";
+import {
+  layoutFor,
+  deskSlots,
+  loungeAnchors,
+  jitterDisc,
+  ROW_LOUNGE,
+  COMMAND_ROW_OFFSET,
+  type RoomRect,
+} from "./roomLayout";
 import { woodFloor, carpet } from "./textures";
 
 type Agent = { id: string; displayName: string; status: string; modelVariant?: string | null };
 type AgentRole = { id: string; name: string; tier: string; requiresApproval: boolean; agents: Agent[] };
-type Division = { id: string; slug: string; name: string; description?: string | null; agentRoles: AgentRole[] };
+type Task = {
+  id: string;
+  title: string;
+  status: string;
+  priority: number;
+  requiresApproval: boolean;
+  resultSummary?: string | null;
+  updatedAt: string;
+};
+type Division = {
+  id: string;
+  slug: string;
+  name: string;
+  description?: string | null;
+  agentRoles: AgentRole[];
+  tasks?: Task[];
+};
 
 const THEME: Record<string, { floor: string; wall: string }> = {
   pusat: { floor: "#9c7a44", wall: "#6b5230" },
@@ -30,15 +54,23 @@ const STATUS_COLOR: Record<string, string> = {
   IDLE: "#6b7a89",
 };
 
-const IDLE_ACTIVITIES = [
-  "main game di sudut",
-  "makan siang",
-  "rebahan sejenak",
-  "ngopi di pantry",
-  "scroll berita",
-  "nonton video",
-  "peregangan",
-  "ngobrol santai",
+// Activities tagged "desk" keep the agent sitting right where they already
+// work instead of walking to the lounge - without this, every idle agent
+// (which can be most of the office on a freshly seeded org) heads for the
+// same four lounge anchors and the result reads as one big crowd rather
+// than a natural, lived-in office.
+const IDLE_ACTIVITIES: { label: string; category: "game" | "pantry" | "sofa" | "stroll" | "desk" }[] = [
+  { label: "main game di sudut", category: "game" },
+  { label: "makan siang", category: "pantry" },
+  { label: "rebahan sejenak", category: "sofa" },
+  { label: "ngopi di pantry", category: "pantry" },
+  { label: "scroll berita", category: "desk" },
+  { label: "nonton video", category: "sofa" },
+  { label: "peregangan", category: "stroll" },
+  { label: "ngobrol santai", category: "stroll" },
+  { label: "merapikan meja", category: "desk" },
+  { label: "baca dokumen", category: "desk" },
+  { label: "istirahat di meja", category: "desk" },
 ];
 
 function hashString(id: string) {
@@ -49,19 +81,41 @@ function hashString(id: string) {
 function idleActivity(id: string) {
   return IDLE_ACTIVITIES[hashString(id) % IDLE_ACTIVITIES.length];
 }
-function idleCategory(activity: string): "game" | "pantry" | "sofa" | "stroll" {
-  if (activity === "main game di sudut") return "game";
-  if (activity === "makan siang" || activity === "ngopi di pantry") return "pantry";
-  if (activity === "rebahan sejenak" || activity === "nonton video") return "sofa";
-  return "stroll";
-}
 function statusLabel(status: string, id: string) {
-  if (status === "IDLE") return idleActivity(id);
+  if (status === "IDLE") return idleActivity(id).label;
   if (status === "WORKING") return "mengerjakan task";
   if (status === "REVIEWING") return "review hasil";
   if (status === "COLLABORATING") return "lapor ke PM";
   if (status === "PAUSED") return "menunggu persetujuan";
   return status.toLowerCase();
+}
+
+type Seat = { pos: THREE.Vector3; facing: number };
+
+/**
+ * Where an idle agent goes: their own desk ("desk" category, no walk at
+ * all) or a jittered spot around a shared lounge anchor. Shared by both
+ * regular desk-bound agents and PMs relocated to the command room, so
+ * either one looks equally natural when idle.
+ */
+function buildIdleTarget(agentId: string, homeSeat: Seat, anchors: ReturnType<typeof loungeAnchors>) {
+  const { category } = idleActivity(agentId);
+  if (category === "desk") {
+    return { pos: homeSeat.pos.clone(), facing: homeSeat.facing, kind: "sit" as const };
+  }
+  const anchor = anchors[category];
+  const seed = hashString(agentId);
+  const [jx, jz] = jitterDisc(seed, anchor.radius);
+  const pos = anchor.pos.clone().add(new THREE.Vector3(jx, 0, jz));
+  const facing = Math.atan2(anchor.pos.x - pos.x, anchor.pos.z - pos.z);
+  return { pos, facing, kind: anchor.kind };
+}
+
+/** The PM role+agent of a division, if it has one (role.requiresApproval). */
+function findPm(d: Division): { role: AgentRole; agent: Agent } | null {
+  const role = d.agentRoles.find((r) => r.requiresApproval);
+  const agent = role?.agents[0];
+  return role && agent ? { role, agent } : null;
 }
 
 type AgentPlan = {
@@ -70,9 +124,9 @@ type AgentPlan = {
   divisionName: string;
   divisionSlug: string;
   accent: string;
-  homeSeat: { pos: THREE.Vector3; facing: number };
+  homeSeat: Seat;
   idleTarget: { pos: THREE.Vector3; facing: number; kind: "sit" | "stand" };
-  pmSeat: { pos: THREE.Vector3; facing: number } | null;
+  pmSeat: Seat | null;
 };
 
 function AgentActor({ plan }: { plan: AgentPlan }) {
@@ -184,10 +238,58 @@ function AgentActor({ plan }: { plan: AgentPlan }) {
   );
 }
 
-function Room({ slug, rect, roleCount }: { slug: string; rect: RoomRect; roleCount: number }) {
+function RoomNameTag({ rect, label, accent }: { rect: RoomRect; label: string; accent: string }) {
+  return (
+    <Html position={[rect.x, 2.55, rect.z + rect.d / 2 + 0.1]} center distanceFactor={11} style={{ pointerEvents: "none" }}>
+      <div
+        style={{
+          fontFamily: "var(--font-sans, system-ui), sans-serif",
+          fontSize: 13,
+          fontWeight: 700,
+          color: "#eef3f7",
+          background: "rgba(10,17,25,0.72)",
+          border: `1px solid ${accent}99`,
+          padding: "4px 11px",
+          borderRadius: 9,
+          whiteSpace: "nowrap",
+        }}
+      >
+        {label}
+      </div>
+    </Html>
+  );
+}
+
+function Room({
+  slug,
+  name,
+  rect,
+  roleCount,
+  commandCount,
+  tasks,
+  onSelect,
+}: {
+  slug: string;
+  name: string;
+  rect: RoomRect;
+  roleCount: number;
+  commandCount: number;
+  tasks: Task[];
+  onSelect: (slug: string) => void;
+}) {
   const theme = THEME[slug] ?? FALLBACK_THEME;
   const slots = useMemo(() => deskSlots(rect, roleCount), [rect, roleCount]);
+  const commandSlots = useMemo(
+    () => (commandCount > 0 ? deskSlots(rect, commandCount, COMMAND_ROW_OFFSET) : []),
+    [rect, commandCount]
+  );
   const floorTex = useMemo(() => woodFloor([rect.w / 2, rect.d / 2]), [rect.w, rect.d]);
+
+  const total = tasks.length;
+  const done = tasks.filter((t) => t.status === "DONE").length;
+  const percent = total > 0 ? Math.round((done / total) * 100) : null;
+
+  const whiteboardPos: [number, number, number] = [rect.x - rect.w / 2 + 0.75, 1.1, rect.z - rect.d / 2 + 0.06];
 
   return (
     <group>
@@ -199,9 +301,50 @@ function Room({ slug, rect, roleCount }: { slug: string; rect: RoomRect; roleCou
         <boxGeometry args={[rect.w, 1.5, 0.08]} />
         <meshStandardMaterial color={theme.wall} roughness={0.9} />
       </mesh>
-      <group position={[rect.x - rect.w / 2 + 0.75, 1.1, rect.z - rect.d / 2 + 0.06]}>
+
+      <RoomNameTag rect={rect} label={name} accent={theme.floor} />
+
+      <group
+        position={whiteboardPos}
+        onClick={(e) => {
+          e.stopPropagation();
+          onSelect(slug);
+        }}
+        onPointerOver={(e) => {
+          e.stopPropagation();
+          document.body.style.cursor = "pointer";
+        }}
+        onPointerOut={() => {
+          document.body.style.cursor = "auto";
+        }}
+      >
         <Whiteboard accent={theme.floor} />
       </group>
+      <Html
+        position={[whiteboardPos[0], whiteboardPos[1] + 1.15, whiteboardPos[2] + 0.1]}
+        center
+        distanceFactor={9}
+        style={{ pointerEvents: "auto", cursor: "pointer" }}
+        onClick={() => onSelect(slug)}
+      >
+        <div
+          style={{
+            fontFamily: "var(--font-sans, system-ui), sans-serif",
+            textAlign: "center",
+            background: "rgba(10,17,25,0.82)",
+            border: "1px solid rgba(255,255,255,0.16)",
+            borderRadius: 8,
+            padding: "4px 10px",
+            whiteSpace: "nowrap",
+          }}
+        >
+          <div style={{ fontSize: 13, fontWeight: 700, color: percent !== null ? "#5fc9b8" : "#7f91a3" }}>
+            {percent !== null ? `${percent}% selesai` : "Belum ada task"}
+          </div>
+          {total > 0 && <div style={{ fontSize: 9.5, color: "rgba(238,243,247,0.65)" }}>{total} task · klik untuk detail</div>}
+        </div>
+      </Html>
+
       <group position={[rect.x + rect.w / 2 - 0.4, 0, rect.z + rect.d / 2 - 0.4]}>
         <Plant />
       </group>
@@ -216,6 +359,38 @@ function Room({ slug, rect, roleCount }: { slug: string; rect: RoomRect; roleCou
           </group>
         </group>
       ))}
+
+      {commandSlots.length > 0 && (
+        <>
+          <Html position={[rect.x, 1.75, rect.z - rect.d / 2 + COMMAND_ROW_OFFSET + 0.75]} center distanceFactor={11} style={{ pointerEvents: "none" }}>
+            <div
+              style={{
+                fontFamily: "var(--font-sans, system-ui), sans-serif",
+                fontSize: 10.5,
+                fontWeight: 600,
+                color: "#eef3f7",
+                background: "rgba(156,122,68,0.75)",
+                padding: "2px 8px",
+                borderRadius: 6,
+                whiteSpace: "nowrap",
+              }}
+            >
+              Meja Komando · PM
+            </div>
+          </Html>
+          {commandSlots.map((s, i) => (
+            <group key={`cmd-${i}`}>
+              <group position={s.desk}>
+                <Desk />
+                <Monitor />
+              </group>
+              <group position={s.seat} rotation={[0, s.facing, 0]}>
+                <Chair color="#6b5230" />
+              </group>
+            </group>
+          ))}
+        </>
+      )}
     </group>
   );
 }
@@ -257,9 +432,42 @@ function Lounge() {
   );
 }
 
-export default function OfficeScene3D({ divisions }: { divisions: Division[] }) {
+export default function OfficeScene3D({
+  divisions,
+  onSelectDivision,
+}: {
+  divisions: Division[];
+  onSelectDivision?: (slug: string) => void;
+}) {
   const layout = useMemo(() => layoutFor(divisions.map((d) => d.slug)), [divisions]);
   const anchors = useMemo(() => loungeAnchors(0), []);
+  const handleSelect = (slug: string) => onSelectDivision?.(slug);
+
+  // "Pusat dan PM dibuatkan ruang terpisah, karena itu area komando": every
+  // division's PM (its requiresApproval role) relocates out of their own
+  // division's desk row into a second, dedicated row inside the Pusat
+  // room - Pusat's own roster stays put, since Pusat already *is* the
+  // command room. Teammates who go COLLABORATING now walk across the floor
+  // to that PM's command desk instead of to a seat inside their own room.
+  const pmByDivision = useMemo(() => {
+    const map: Record<string, { role: AgentRole; agent: Agent } | null> = {};
+    for (const d of divisions) map[d.slug] = d.slug === "pusat" ? null : findPm(d);
+    return map;
+  }, [divisions]);
+
+  const relocatedPms = useMemo(
+    () =>
+      divisions
+        .map((d) => ({ division: d, pm: pmByDivision[d.slug] }))
+        .filter((e): e is { division: Division; pm: { role: AgentRole; agent: Agent } } => !!e.pm),
+    [divisions, pmByDivision]
+  );
+
+  const pusatRect = layout["pusat"];
+  const commandSlots = useMemo(
+    () => (pusatRect ? deskSlots(pusatRect, relocatedPms.length, COMMAND_ROW_OFFSET) : []),
+    [pusatRect, relocatedPms.length]
+  );
 
   const plans: AgentPlan[] = useMemo(() => {
     const result: AgentPlan[] = [];
@@ -267,38 +475,68 @@ export default function OfficeScene3D({ divisions }: { divisions: Division[] }) 
     for (const d of divisions) {
       const rect = layout[d.slug];
       if (!rect) continue;
-      const flatAgents = d.agentRoles.flatMap((r) => r.agents.map((a) => ({ a, r })));
+      const relocatedPm = pmByDivision[d.slug];
+      const flatAgents = d.agentRoles
+        .flatMap((r) => r.agents.map((a) => ({ a, r })))
+        .filter(({ a }) => a.id !== relocatedPm?.agent.id);
       const slots = deskSlots(rect, flatAgents.length);
-      const pmRole = d.agentRoles.find((r) => r.requiresApproval);
-      const pmAgent = pmRole?.agents[0];
-      const pmIndex = pmAgent ? flatAgents.findIndex((x) => x.a.id === pmAgent.id) : -1;
-      const pmSeat = pmIndex >= 0 ? { pos: slots[pmIndex].seat.clone().add(new THREE.Vector3(0, 0, -0.35)), facing: 0 } : null;
+
+      // Who a COLLABORATING teammate in this division walks to.
+      let pmSeat: Seat | null = null;
+      if (relocatedPm) {
+        const idx = relocatedPms.findIndex((e) => e.pm.agent.id === relocatedPm.agent.id);
+        const slot = commandSlots[idx];
+        if (slot) pmSeat = { pos: slot.seat.clone(), facing: slot.facing };
+      } else {
+        // Pusat's own PM (if it has one) never relocates - they already
+        // sit in the command room with the rest of Pusat, just a half-step
+        // forward of their own desk so a visiting teammate reads as
+        // "stepping up to the PM" rather than "sitting at a spare desk".
+        const ownPm = d.slug === "pusat" ? findPm(d) : null;
+        if (ownPm) {
+          const pmIndex = flatAgents.findIndex((x) => x.a.id === ownPm.agent.id);
+          if (pmIndex >= 0) {
+            pmSeat = { pos: slots[pmIndex].seat.clone().add(new THREE.Vector3(0, 0, -0.35)), facing: 0 };
+          }
+        }
+      }
 
       flatAgents.forEach(({ a, r }, i) => {
         const slot = slots[i];
-        const activity = idleActivity(a.id);
-        const category = idleCategory(activity);
-        const anchor = anchors[category];
-        const seed = hashString(a.id);
-        const [jx, jz] = jitterDisc(seed, anchor.radius);
-        const idlePos = anchor.pos.clone().add(new THREE.Vector3(jx, 0, jz));
-        // face back toward the anchor point so a cluster reads as "gathered around it"
-        const facing = Math.atan2(anchor.pos.x - idlePos.x, anchor.pos.z - idlePos.z);
-
+        const homeSeat: Seat = { pos: slot.seat, facing: slot.facing };
+        const isPmThemself = pmSeat !== null && d.slug === "pusat" && findPm(d)?.agent.id === a.id;
         result.push({
           agent: a,
           roleName: r.name,
           divisionName: d.name,
           divisionSlug: d.slug,
           accent: THEME[d.slug]?.floor ?? FALLBACK_THEME.floor,
-          homeSeat: { pos: slot.seat, facing: slot.facing },
-          idleTarget: { pos: idlePos, facing, kind: anchor.kind },
-          pmSeat: pmAgent && pmAgent.id !== a.id ? pmSeat : null,
+          homeSeat,
+          idleTarget: buildIdleTarget(a.id, homeSeat, anchors),
+          pmSeat: isPmThemself ? null : pmSeat,
         });
       });
     }
+
+    // Relocated PMs get their own plan entry seated at their command desk.
+    relocatedPms.forEach(({ division: d, pm }, idx) => {
+      const slot = commandSlots[idx];
+      if (!slot) return;
+      const homeSeat: Seat = { pos: slot.seat.clone(), facing: slot.facing };
+      result.push({
+        agent: pm.agent,
+        roleName: pm.role.name,
+        divisionName: d.name,
+        divisionSlug: d.slug,
+        accent: THEME[d.slug]?.floor ?? FALLBACK_THEME.floor,
+        homeSeat,
+        idleTarget: buildIdleTarget(pm.agent.id, homeSeat, anchors),
+        pmSeat: null,
+      });
+    });
+
     return result;
-  }, [divisions, layout, anchors]);
+  }, [divisions, layout, anchors, pmByDivision, relocatedPms, commandSlots]);
 
   return (
     <Canvas shadows camera={{ position: [0, 15, 23], fov: 45 }} dpr={[1, 1.5]}>
@@ -323,8 +561,21 @@ export default function OfficeScene3D({ divisions }: { divisions: Division[] }) 
       {divisions.map((d) => {
         const rect = layout[d.slug];
         if (!rect) return null;
-        const roleCount = d.agentRoles.reduce((sum, r) => sum + r.agents.length, 0);
-        return <Room key={d.id} slug={d.slug} rect={rect} roleCount={roleCount} />;
+        const relocatedPm = pmByDivision[d.slug];
+        const roleCount = d.agentRoles.reduce((sum, r) => sum + r.agents.length, 0) - (relocatedPm ? 1 : 0);
+        const commandCount = d.slug === "pusat" ? relocatedPms.length : 0;
+        return (
+          <Room
+            key={d.id}
+            slug={d.slug}
+            name={d.name}
+            rect={rect}
+            roleCount={roleCount}
+            commandCount={commandCount}
+            tasks={d.tasks ?? []}
+            onSelect={handleSelect}
+          />
+        );
       })}
       <Lounge />
 

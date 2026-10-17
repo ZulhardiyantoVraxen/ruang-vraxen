@@ -27,12 +27,49 @@ type AgentRole = {
   agents: Agent[];
 };
 
+type Task = {
+  id: string;
+  title: string;
+  status: string;
+  priority: number;
+  requiresApproval: boolean;
+  resultSummary?: string | null;
+  updatedAt: string;
+};
+
 type Division = {
   id: string;
   slug: string;
   name: string;
   description?: string | null;
   agentRoles: AgentRole[];
+  tasks?: Task[];
+};
+
+const TASK_STATUS_LABEL: Record<string, string> = {
+  TRIAGE: "Triase",
+  TODO: "Belum dikerjakan",
+  SCHEDULED: "Terjadwal",
+  READY: "Siap dikerjakan",
+  RUNNING: "Berjalan",
+  BLOCKED: "Terblokir",
+  REVIEW: "Review",
+  APPROVAL_PENDING: "Menunggu approval",
+  DONE: "Selesai",
+  REJECTED: "Ditolak",
+};
+
+const TASK_STATUS_COLOR: Record<string, string> = {
+  TRIAGE: "#7f91a3",
+  TODO: "#7f91a3",
+  SCHEDULED: "#7f91a3",
+  READY: "#5b9bd6",
+  RUNNING: "#5fc9b8",
+  BLOCKED: "#d6665b",
+  REVIEW: "#e0a63e",
+  APPROVAL_PENDING: "#9f8fe0",
+  DONE: "#5fc9b8",
+  REJECTED: "#d6665b",
 };
 
 type Approval = {
@@ -157,6 +194,8 @@ export default function OfficeDashboard({ divisions, approvals }: { divisions: D
   const [tab, setTab] = useState<"crew" | "stats" | "flow">("crew");
   const [view, setView] = useState<"2d" | "3d">("3d");
   const [selected, setSelected] = useState<FlatAgent | null>(null);
+  const [selectedDivisionSlug, setSelectedDivisionSlug] = useState<string | null>(null);
+  const selectedDivision = divisions.find((d) => d.slug === selectedDivisionSlug) ?? null;
   const [rotation, setRotation] = useState(0);
   const [zoom, setZoom] = useState(0.72);
   const [dragStart, setDragStart] = useState<{ x: number; rotation: number } | null>(null);
@@ -257,7 +296,7 @@ export default function OfficeDashboard({ divisions, approvals }: { divisions: D
       <div className={styles.layoutRow}>
         {view === "3d" ? (
           <div className={styles.stage3d}>
-            <OfficeScene3D divisions={divisions} />
+            <OfficeScene3D divisions={divisions} onSelectDivision={setSelectedDivisionSlug} />
           </div>
         ) : (
         <div
@@ -430,6 +469,47 @@ export default function OfficeDashboard({ divisions, approvals }: { divisions: D
               <span className={styles.statValue}>{selected.requiresApproval ? "Ya" : "Tidak"}</span>
             </div>
             <button type="button" className={styles.modalClose} onClick={() => setSelected(null)}>
+              Tutup
+            </button>
+          </div>
+        </div>
+      )}
+
+      {selectedDivision && (
+        <div className={styles.overlay} onClick={() => setSelectedDivisionSlug(null)}>
+          <div className={`${styles.modal} ${styles.modalWide}`} onClick={(e) => e.stopPropagation()}>
+            <p className={styles.modalName}>{selectedDivision.name}</p>
+            <p className={styles.modalRole}>Papan tulis divisi · apa yang sedang dikerjakan</p>
+            {(() => {
+              const tasks = selectedDivision.tasks ?? [];
+              const done = tasks.filter((t) => t.status === "DONE").length;
+              const percent = tasks.length > 0 ? Math.round((done / tasks.length) * 100) : null;
+              return (
+                <div className={styles.statRow}>
+                  <span className={styles.statLabel}>Progres</span>
+                  <span className={styles.statValue}>
+                    {percent !== null ? `${percent}% (${done}/${tasks.length})` : "Belum ada task"}
+                  </span>
+                </div>
+              );
+            })()}
+            <div className={styles.taskList}>
+              {(selectedDivision.tasks ?? []).length === 0 && (
+                <p className={styles.empty}>Belum ada task untuk divisi ini.</p>
+              )}
+              {(selectedDivision.tasks ?? []).map((t) => (
+                <div key={t.id} className={styles.taskRow}>
+                  <div className={styles.taskRowTop}>
+                    <span className={styles.taskTitle}>{t.title}</span>
+                    <span className={styles.taskStatus} style={{ color: TASK_STATUS_COLOR[t.status] ?? "#7f91a3" }}>
+                      {TASK_STATUS_LABEL[t.status] ?? t.status}
+                    </span>
+                  </div>
+                  {t.resultSummary && <p className={styles.taskSummary}>{t.resultSummary}</p>}
+                </div>
+              ))}
+            </div>
+            <button type="button" className={styles.modalClose} onClick={() => setSelectedDivisionSlug(null)}>
               Tutup
             </button>
           </div>

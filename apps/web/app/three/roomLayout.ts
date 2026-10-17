@@ -35,11 +35,17 @@ export function layoutFor(slugs: string[]) {
   return rects;
 }
 
-/** One desk+chair slot per agent, spaced along the room's back wall. */
-export function deskSlots(room: RoomRect, count: number) {
+/**
+ * One desk+chair slot per agent, spaced along the room's back wall.
+ * `rowOffsetZ` pushes a whole row deeper into the room (toward the
+ * entrance) without touching the first row - used to give the "Pusat"
+ * room a second row of desks for visiting PMs (see commandSeatsFor in
+ * OfficeScene3D.tsx), so a command desk never overlaps Pusat's own staff row.
+ */
+export function deskSlots(room: RoomRect, count: number, rowOffsetZ = 0) {
   const n = Math.max(count, 1);
   const spacing = room.w / (n + 1);
-  const wallZ = room.z - room.d / 2 + 0.55;
+  const wallZ = room.z - room.d / 2 + 0.55 + rowOffsetZ;
   const seatZ = wallZ + 0.65;
   const slots: { desk: THREE.Vector3; seat: THREE.Vector3; facing: number }[] = [];
   for (let i = 0; i < n; i++) {
@@ -53,6 +59,9 @@ export function deskSlots(room: RoomRect, count: number) {
   return slots;
 }
 
+/** How far into the room the second ("command") desk row sits. */
+export const COMMAND_ROW_OFFSET = 1.55;
+
 /**
  * One ANCHOR per idle activity, not a fixed pool of seats - the office can
  * realistically have every agent idle at once (e.g. a freshly seeded org
@@ -60,13 +69,20 @@ export function deskSlots(room: RoomRect, count: number) {
  * chairs. Each idle agent gets a deterministic jittered offset around its
  * category's anchor (see idleSpotFor below) so a crowd reads as "gathered
  * around the sofa / game table" rather than everyone stacked on one point.
+ * Radii are generous on purpose - a tight jitter reads as "huddled in a
+ * clump" the moment more than two or three agents land on the same anchor,
+ * and "stroll" in particular spreads across most of the open lounge floor
+ * rather than one corner of it. A separate "desk" idle category (see
+ * OfficeScene3D.tsx) keeps some idle agents at their own desk instead of
+ * sending everyone to the lounge at once, which is the other half of
+ * looking natural rather than grouped.
  */
 export function loungeAnchors(centerX: number) {
   return {
-    sofa: { pos: new THREE.Vector3(centerX - 1.2, 0, ROW_LOUNGE - 0.15), facing: 0, kind: "sit" as const, radius: 0.5 },
-    game: { pos: new THREE.Vector3(centerX + 0.75, 0, ROW_LOUNGE), facing: Math.PI / 2, kind: "sit" as const, radius: 0.55 },
-    pantry: { pos: new THREE.Vector3(centerX + 2.6, 0, ROW_LOUNGE - 0.6), facing: Math.PI, kind: "stand" as const, radius: 0.5 },
-    stroll: { pos: new THREE.Vector3(centerX - 2.3, 0, ROW_LOUNGE + 1.0), facing: 0, kind: "stand" as const, radius: 1.1 },
+    sofa: { pos: new THREE.Vector3(centerX - 1.2, 0, ROW_LOUNGE - 0.15), facing: 0, kind: "sit" as const, radius: 0.75 },
+    game: { pos: new THREE.Vector3(centerX + 0.75, 0, ROW_LOUNGE), facing: Math.PI / 2, kind: "sit" as const, radius: 0.8 },
+    pantry: { pos: new THREE.Vector3(centerX + 2.6, 0, ROW_LOUNGE - 0.6), facing: Math.PI, kind: "stand" as const, radius: 0.8 },
+    stroll: { pos: new THREE.Vector3(centerX - 2.3, 0, ROW_LOUNGE + 1.0), facing: 0, kind: "stand" as const, radius: 2.1 },
   };
 }
 

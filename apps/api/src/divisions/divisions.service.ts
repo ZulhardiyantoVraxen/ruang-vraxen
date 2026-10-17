@@ -14,7 +14,25 @@ export class DivisionsService {
   /** Every division (and its roster below) is a row, created at runtime - never hardcoded. */
   list() {
     return this.prisma.division.findMany({
-      include: { agentRoles: { include: { agents: true, modelClass: true } } },
+      include: {
+        agentRoles: { include: { agents: true, modelClass: true } },
+        // Top-level tasks only (no subtasks) - just enough for the office
+        // view's per-division completion % and "what are they working on"
+        // whiteboard detail, so this stays light even with a busy backlog.
+        tasks: {
+          where: { parentTaskId: null },
+          orderBy: { updatedAt: "desc" },
+          select: {
+            id: true,
+            title: true,
+            status: true,
+            priority: true,
+            requiresApproval: true,
+            resultSummary: true,
+            updatedAt: true,
+          },
+        },
+      },
       orderBy: { createdAt: "asc" },
     });
   }
