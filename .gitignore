@@ -8,5 +8,6 @@ build/
 infra/.env.prod
 *.log
 .DS_Store
+*.tsbuildinfo
 pnpm-lock.yaml
 secrets/*.txt
