@@ -42,7 +42,12 @@ echo "==> Building apps/worker"
 pnpm --filter @platform/worker build
 
 echo "==> Building apps/web (next build, output: standalone)"
-pnpm --filter @platform/web build
+# next.config.ts's rewrites() destination is resolved at BUILD time (baked
+# into .next/routes-manifest.json), not read fresh at container startup, so
+# API_URL has to be correct here - matching the docker-compose service name
+# the deployed container will actually run with - not just set later via
+# the container's env_file.
+API_URL=http://api:4000 pnpm --filter @platform/web build
 
 echo "==> Staging dist-only artifacts (pnpm deploy --prod inlines workspace deps, prod deps only)"
 # --legacy: pnpm v10 defaults to requiring inject-workspace-packages=true for
