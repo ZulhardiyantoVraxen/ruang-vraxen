@@ -6,6 +6,15 @@
 # NO published host ports, same principle as the existing MCP server (bind internal,
 # let Caddy be the only public door). Memory limits are sized to leave real headroom
 # on a box with no swap configured yet (see README section "VPS: apa yang diperlukan").
+#
+# api/worker/web run from pre-built images (ruang-api/ruang-worker/ruang-web),
+# NOT from `build:` against the repo. The images are produced by
+# infra/build-and-deploy.sh, which: clones the repo into a throwaway temp dir,
+# installs deps, runs `pnpm build` + `pnpm deploy --prod` (api/worker) or
+# `next build` with output:"standalone" (web) to get dist-only artifacts,
+# `docker build`s each artifact dir with infra/docker-runtime/*.Dockerfile,
+# then deletes the temp clone. No source or devDependencies ever end up in
+# an image layer, and no repository checkout persists on this VPS afterwards.
 name: ruang-vraxen
 
 services:
@@ -60,7 +69,7 @@ services:
     # when needed, same pattern already used for other admin UIs on this box.
 
   api:
-    build: { context: .., dockerfile: apps/api/Dockerfile }
+    image: ruang-api:latest
     restart: unless-stopped
     env_file: .env.prod
     depends_on: [postgres, redis, kafka]
@@ -69,7 +78,7 @@ services:
     ports: ["127.0.0.1:4000:4000"] # Caddy proxies to this; not reachable from outside the box directly
 
   worker:
-    build: { context: .., dockerfile: apps/worker/Dockerfile }
+    image: ruang-worker:latest
     restart: unless-stopped
     env_file: .env.prod
     depends_on: [postgres, kafka, api]
@@ -81,7 +90,7 @@ services:
     # events automatically; raise the count once real task volume is known.
 
   web:
-    build: { context: .., dockerfile: apps/web/Dockerfile }
+    image: ruang-web:latest
     restart: unless-stopped
     environment:
       API_URL: http://api:4000
