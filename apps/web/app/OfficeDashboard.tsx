@@ -155,7 +155,7 @@ const FLOW_STEPS = [
 
 export default function OfficeDashboard({ divisions, approvals }: { divisions: Division[]; approvals: Approval[] }) {
   const [tab, setTab] = useState<"crew" | "stats" | "flow">("crew");
-  const [view, setView] = useState<"2d" | "3d">("3d");
+  const [view, setView] = useState<"2d" | "3d">("2d");
   const [selected, setSelected] = useState<FlatAgent | null>(null);
   const [rotation, setRotation] = useState(0);
   const [zoom, setZoom] = useState(0.72);

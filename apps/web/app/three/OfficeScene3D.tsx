@@ -1,12 +1,12 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { Suspense, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls, Html } from "@react-three/drei";
 import * as THREE from "three";
 import { Character, type Pose } from "./Character";
 import { Desk, Monitor, Chair, Whiteboard, Plant, Sofa, GameTable, PantryCounter } from "./Furniture";
-import { layoutFor, deskSlots, loungeSpots, ROW_LOUNGE, type RoomRect } from "./roomLayout";
+import { layoutFor, deskSlots, loungeAnchors, jitterDisc, ROW_LOUNGE, type RoomRect } from "./roomLayout";
 
 type Agent = { id: string; displayName: string; status: string; modelVariant?: string | null };
 type AgentRole = { id: string; name: string; tier: string; requiresApproval: boolean; agents: Agent[] };
@@ -219,20 +219,20 @@ function Room({ slug, rect, roleCount }: { slug: string; rect: RoomRect; roleCou
 }
 
 function Lounge() {
-  const spots = useMemo(() => loungeSpots(0), []);
+  const anchors = useMemo(() => loungeAnchors(0), []);
   return (
     <group>
       <mesh position={[0, 0, ROW_LOUNGE]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
         <planeGeometry args={[7.6, 3.2]} />
         <meshStandardMaterial color="#5c4426" roughness={0.9} />
       </mesh>
-      <group position={[spots.sofa[0].pos.x + 0.35, 0, ROW_LOUNGE]}>
+      <group position={[anchors.sofa.pos.x + 0.35, 0, anchors.sofa.pos.z]}>
         <Sofa />
       </group>
-      <group position={[spots.game[0].pos.x, 0, ROW_LOUNGE]}>
+      <group position={[anchors.game.pos.x, 0, anchors.game.pos.z]}>
         <GameTable />
       </group>
-      <group position={[spots.pantry[0].pos.x - 0.25, 0, ROW_LOUNGE - 0.75]}>
+      <group position={[anchors.pantry.pos.x - 0.25, 0, anchors.pantry.pos.z - 0.75]}>
         <PantryCounter />
       </group>
       <Html position={[-2.0, 1.3, ROW_LOUNGE - 1.4]} center distanceFactor={11} style={{ pointerEvents: "none" }}>
@@ -256,11 +256,10 @@ function Lounge() {
 
 export default function OfficeScene3D({ divisions }: { divisions: Division[] }) {
   const layout = useMemo(() => layoutFor(divisions.map((d) => d.slug)), [divisions]);
-  const lounge = useMemo(() => loungeSpots(0), []);
+  const anchors = useMemo(() => loungeAnchors(0), []);
 
   const plans: AgentPlan[] = useMemo(() => {
     const result: AgentPlan[] = [];
-    const idleCounters: Record<string, number> = { game: 0, pantry: 0, sofa: 0, stroll: 0 };
 
     for (const d of divisions) {
       const rect = layout[d.slug];
@@ -276,9 +275,12 @@ export default function OfficeScene3D({ divisions }: { divisions: Division[] }) 
         const slot = slots[i];
         const activity = idleActivity(a.id);
         const category = idleCategory(activity);
-        const pool = lounge[category];
-        const idx = idleCounters[category]++ % pool.length;
-        const spot = pool[idx];
+        const anchor = anchors[category];
+        const seed = hashString(a.id);
+        const [jx, jz] = jitterDisc(seed, anchor.radius);
+        const idlePos = anchor.pos.clone().add(new THREE.Vector3(jx, 0, jz));
+        // face back toward the anchor point so a cluster reads as "gathered around it"
+        const facing = Math.atan2(anchor.pos.x - idlePos.x, anchor.pos.z - idlePos.z);
 
         result.push({
           agent: a,
@@ -287,51 +289,53 @@ export default function OfficeScene3D({ divisions }: { divisions: Division[] }) 
           divisionSlug: d.slug,
           accent: THEME[d.slug]?.floor ?? FALLBACK_THEME.floor,
           homeSeat: { pos: slot.seat, facing: slot.facing },
-          idleTarget: { pos: spot.pos, facing: spot.facing, kind: spot.kind },
+          idleTarget: { pos: idlePos, facing, kind: anchor.kind },
           pmSeat: pmAgent && pmAgent.id !== a.id ? pmSeat : null,
         });
       });
     }
     return result;
-  }, [divisions, layout, lounge]);
+  }, [divisions, layout, anchors]);
 
   return (
-    <Canvas shadows camera={{ position: [0, 10, 14], fov: 42 }} dpr={[1, 1.5]}>
+    <Canvas shadows camera={{ position: [0, 15, 23], fov: 45 }} dpr={[1, 1.5]}>
       <color attach="background" args={["#0b1420"]} />
-      <fog attach="fog" args={["#0b1420", 18, 34]} />
-      <ambientLight intensity={0.55} />
+      <fog attach="fog" args={["#0b1420", 24, 46]} />
+      <ambientLight intensity={0.6} />
       <directionalLight
-        position={[6, 10, 4]}
-        intensity={1.1}
+        position={[6, 12, 6]}
+        intensity={1.15}
         castShadow
         shadow-mapSize={[1024, 1024]}
-        shadow-camera-left={-12}
-        shadow-camera-right={12}
-        shadow-camera-top={12}
-        shadow-camera-bottom={-12}
+        shadow-camera-left={-14}
+        shadow-camera-right={14}
+        shadow-camera-top={14}
+        shadow-camera-bottom={-14}
       />
       <mesh position={[0, -0.01, ROW_LOUNGE / 2]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-        <planeGeometry args={[40, 40]} />
-        <meshStandardMaterial color="#13261c" roughness={1} />
+        <planeGeometry args={[30, 30]} />
+        <meshStandardMaterial color="#1b2f24" roughness={1} />
       </mesh>
 
-      {divisions.map((d) => {
-        const rect = layout[d.slug];
-        if (!rect) return null;
-        const roleCount = d.agentRoles.reduce((sum, r) => sum + r.agents.length, 0);
-        return <Room key={d.id} slug={d.slug} rect={rect} roleCount={roleCount} />;
-      })}
-      <Lounge />
+      <Suspense fallback={null}>
+        {divisions.map((d) => {
+          const rect = layout[d.slug];
+          if (!rect) return null;
+          const roleCount = d.agentRoles.reduce((sum, r) => sum + r.agents.length, 0);
+          return <Room key={d.id} slug={d.slug} rect={rect} roleCount={roleCount} />;
+        })}
+        <Lounge />
 
-      {plans.map((plan) => (
-        <AgentActor key={plan.agent.id} plan={plan} />
-      ))}
+        {plans.map((plan) => (
+          <AgentActor key={plan.agent.id} plan={plan} />
+        ))}
+      </Suspense>
 
       <OrbitControls
         makeDefault
         target={[0, 0.8, ROW_LOUNGE / 2]}
         minDistance={6}
-        maxDistance={28}
+        maxDistance={32}
         maxPolarAngle={Math.PI / 2.1}
         enableDamping
         dampingFactor={0.08}

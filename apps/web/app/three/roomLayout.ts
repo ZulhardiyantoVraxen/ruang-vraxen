@@ -53,24 +53,26 @@ export function deskSlots(room: RoomRect, count: number) {
   return slots;
 }
 
-/** Fixed, hand-placed spots in the shared lounge/break area. */
-export function loungeSpots(centerX: number) {
+/**
+ * One ANCHOR per idle activity, not a fixed pool of seats - the office can
+ * realistically have every agent idle at once (e.g. a freshly seeded org
+ * with no tasks assigned yet), and there are far more agents than literal
+ * chairs. Each idle agent gets a deterministic jittered offset around its
+ * category's anchor (see idleSpotFor below) so a crowd reads as "gathered
+ * around the sofa / game table" rather than everyone stacked on one point.
+ */
+export function loungeAnchors(centerX: number) {
   return {
-    sofa: [
-      { pos: new THREE.Vector3(centerX - 1.55, 0, ROW_LOUNGE - 0.15), facing: 0, kind: "sit" as const },
-      { pos: new THREE.Vector3(centerX - 0.9, 0, ROW_LOUNGE - 0.15), facing: 0, kind: "sit" as const },
-    ],
-    game: [
-      { pos: new THREE.Vector3(centerX + 0.75, 0, ROW_LOUNGE - 0.55), facing: Math.PI, kind: "sit" as const },
-      { pos: new THREE.Vector3(centerX + 0.75, 0, ROW_LOUNGE + 0.55), facing: 0, kind: "sit" as const },
-    ],
-    pantry: [
-      { pos: new THREE.Vector3(centerX + 2.45, 0, ROW_LOUNGE - 0.5), facing: Math.PI, kind: "stand" as const },
-      { pos: new THREE.Vector3(centerX + 2.95, 0, ROW_LOUNGE - 0.5), facing: Math.PI, kind: "stand" as const },
-    ],
-    stroll: [
-      { pos: new THREE.Vector3(centerX - 2.4, 0, ROW_LOUNGE + 0.8), facing: 0.6, kind: "stand" as const },
-      { pos: new THREE.Vector3(centerX + 0.2, 0, ROW_LOUNGE + 1.3), facing: -0.4, kind: "stand" as const },
-    ],
+    sofa: { pos: new THREE.Vector3(centerX - 1.2, 0, ROW_LOUNGE - 0.15), facing: 0, kind: "sit" as const, radius: 0.5 },
+    game: { pos: new THREE.Vector3(centerX + 0.75, 0, ROW_LOUNGE), facing: Math.PI / 2, kind: "sit" as const, radius: 0.55 },
+    pantry: { pos: new THREE.Vector3(centerX + 2.6, 0, ROW_LOUNGE - 0.6), facing: Math.PI, kind: "stand" as const, radius: 0.5 },
+    stroll: { pos: new THREE.Vector3(centerX - 2.3, 0, ROW_LOUNGE + 1.0), facing: 0, kind: "stand" as const, radius: 1.1 },
   };
+}
+
+/** Deterministic pseudo-random offset within a disc, from a seed. */
+export function jitterDisc(seed: number, radius: number): [number, number] {
+  const a = (seed % 360) * (Math.PI / 180);
+  const r = radius * (0.35 + 0.65 * (((seed * 2654435761) >>> 0) % 1000) / 1000);
+  return [Math.cos(a) * r, Math.sin(a) * r];
 }
