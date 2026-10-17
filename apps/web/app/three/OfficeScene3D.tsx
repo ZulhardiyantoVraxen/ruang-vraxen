@@ -324,10 +324,16 @@ function Room({
         position={[whiteboardPos[0], whiteboardPos[1] + 1.15, whiteboardPos[2] + 0.1]}
         center
         distanceFactor={9}
-        style={{ pointerEvents: "auto", cursor: "pointer" }}
-        onClick={() => onSelect(slug)}
+        // drei's <Html> only forwards {ref, style, className, children} to
+        // the actual DOM node it renders - any onClick/onPointerOver passed
+        // to <Html> itself lands on its (otherwise empty) three.js group
+        // wrapper instead, where nothing is ever there to raycast against,
+        // so the handler can never fire. The click handler has to live on
+        // this inner <div>, which is real DOM content.
+        style={{ pointerEvents: "auto" }}
       >
         <div
+          onClick={() => onSelect(slug)}
           style={{
             fontFamily: "var(--font-sans, system-ui), sans-serif",
             textAlign: "center",
@@ -336,6 +342,7 @@ function Room({
             borderRadius: 8,
             padding: "4px 10px",
             whiteSpace: "nowrap",
+            cursor: "pointer",
           }}
         >
           <div style={{ fontSize: 13, fontWeight: 700, color: percent !== null ? "#5fc9b8" : "#7f91a3" }}>
