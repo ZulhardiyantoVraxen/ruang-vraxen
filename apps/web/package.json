@@ -13,8 +13,7 @@
     "next": "^15.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "three": "^0.186.1",
-    "three-stdlib": "^2.36.1"
+    "three": "^0.186.1"
   },
   "devDependencies": {
     "@types/node": "^22.7.0",

@@ -1,12 +1,13 @@
 "use client";
 
-import { Suspense, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls, Html } from "@react-three/drei";
 import * as THREE from "three";
 import { Character, type Pose } from "./Character";
 import { Desk, Monitor, Chair, Whiteboard, Plant, Sofa, GameTable, PantryCounter } from "./Furniture";
 import { layoutFor, deskSlots, loungeAnchors, jitterDisc, ROW_LOUNGE, type RoomRect } from "./roomLayout";
+import { woodFloor, carpet } from "./textures";
 
 type Agent = { id: string; displayName: string; status: string; modelVariant?: string | null };
 type AgentRole = { id: string; name: string; tier: string; requiresApproval: boolean; agents: Agent[] };
@@ -137,7 +138,7 @@ function AgentActor({ plan }: { plan: AgentPlan }) {
 
   return (
     <group ref={group} position={plan.homeSeat.pos}>
-      <Character accent={plan.accent} pose={effectivePose} active={active && !walkingNow} seed={hashString(plan.agent.id) % 100} />
+      <Character name={plan.agent.id} pose={effectivePose} active={active && !walkingNow} />
       <Html position={[0, 1.55, 0]} center distanceFactor={9} style={{ pointerEvents: "none" }}>
         <div
           style={{
@@ -186,12 +187,13 @@ function AgentActor({ plan }: { plan: AgentPlan }) {
 function Room({ slug, rect, roleCount }: { slug: string; rect: RoomRect; roleCount: number }) {
   const theme = THEME[slug] ?? FALLBACK_THEME;
   const slots = useMemo(() => deskSlots(rect, roleCount), [rect, roleCount]);
+  const floorTex = useMemo(() => woodFloor([rect.w / 2, rect.d / 2]), [rect.w, rect.d]);
 
   return (
     <group>
       <mesh position={[rect.x, 0, rect.z]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
         <planeGeometry args={[rect.w, rect.d]} />
-        <meshStandardMaterial color={theme.floor} roughness={0.85} />
+        <meshStandardMaterial map={floorTex} color={theme.floor} roughness={0.75} />
       </mesh>
       <mesh position={[rect.x, 0.75, rect.z - rect.d / 2]} castShadow>
         <boxGeometry args={[rect.w, 1.5, 0.08]} />
@@ -220,11 +222,12 @@ function Room({ slug, rect, roleCount }: { slug: string; rect: RoomRect; roleCou
 
 function Lounge() {
   const anchors = useMemo(() => loungeAnchors(0), []);
+  const rug = useMemo(() => carpet("#5b7c8c", [4, 2]), []);
   return (
     <group>
       <mesh position={[0, 0, ROW_LOUNGE]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
         <planeGeometry args={[7.6, 3.2]} />
-        <meshStandardMaterial color="#5c4426" roughness={0.9} />
+        <meshStandardMaterial map={rug} roughness={0.9} />
       </mesh>
       <group position={[anchors.sofa.pos.x + 0.35, 0, anchors.sofa.pos.z]}>
         <Sofa />
@@ -317,19 +320,17 @@ export default function OfficeScene3D({ divisions }: { divisions: Division[] }) 
         <meshStandardMaterial color="#1b2f24" roughness={1} />
       </mesh>
 
-      <Suspense fallback={null}>
-        {divisions.map((d) => {
-          const rect = layout[d.slug];
-          if (!rect) return null;
-          const roleCount = d.agentRoles.reduce((sum, r) => sum + r.agents.length, 0);
-          return <Room key={d.id} slug={d.slug} rect={rect} roleCount={roleCount} />;
-        })}
-        <Lounge />
+      {divisions.map((d) => {
+        const rect = layout[d.slug];
+        if (!rect) return null;
+        const roleCount = d.agentRoles.reduce((sum, r) => sum + r.agents.length, 0);
+        return <Room key={d.id} slug={d.slug} rect={rect} roleCount={roleCount} />;
+      })}
+      <Lounge />
 
-        {plans.map((plan) => (
-          <AgentActor key={plan.agent.id} plan={plan} />
-        ))}
-      </Suspense>
+      {plans.map((plan) => (
+        <AgentActor key={plan.agent.id} plan={plan} />
+      ))}
 
       <OrbitControls
         makeDefault
