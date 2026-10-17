@@ -59,10 +59,14 @@ pnpm --filter @platform/worker deploy --prod --legacy "$STAGE_DIR/worker"
 # node_modules, using a temporary copy of the schema - removed right after,
 # nothing but the generated client output remains.
 echo "==> Regenerating Prisma Client inside each staged node_modules"
+# A global install (once) is more reliable here than two separate `npx -y`
+# calls, which were observed to flake on the second invocation ("prisma: not
+# found") - looked like an npx bin-linking/caching quirk, not worth chasing.
+npm install -g prisma@5.22.0 --silent
 for TARGET in "$STAGE_DIR/api" "$STAGE_DIR/worker"; do
   mkdir -p "$TARGET/prisma"
   cp packages/db/prisma/schema.prisma "$TARGET/prisma/schema.prisma"
-  (cd "$TARGET" && npx -y prisma@5.22.0 generate --schema=prisma/schema.prisma)
+  (cd "$TARGET" && prisma generate --schema=prisma/schema.prisma)
   rm -rf "$TARGET/prisma"
 done
 
