@@ -8,7 +8,7 @@
     "strict": true,
     "skipLibCheck": true,
     "outDir": "./dist",
-    "baseUrl": "./",
-    "paths": { "@platform/shared": ["../../packages/shared/src"] }
-  }
+    "baseUrl": "./"
+  },
+  "include": ["src"]
 }
