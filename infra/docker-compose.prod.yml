@@ -67,7 +67,14 @@ services:
     networks: [internal]
 
   minio:
-    image: minio/minio:latest
+    # minio/minio was pulled from Docker Hub entirely (MinIO's 2026 licensing
+    # change) - using Chainguard's mirror instead, same MinIO binary. That image
+    # runs as non-root UID 65532 by default, which can't write to a fresh
+    # docker-managed volume (created root-owned); running it as root here avoids
+    # needing a separate chown-init step, and is a low-risk tradeoff since this
+    # container is internal-only (no published port) anyway.
+    image: cgr.dev/chainguard/minio:latest
+    user: "0:0"
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
