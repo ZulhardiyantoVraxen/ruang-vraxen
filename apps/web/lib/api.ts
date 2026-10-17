@@ -2,8 +2,20 @@
  * Every page fetches through this one client -> the UI never hardcodes which
  * divisions/roles/tasks exist. New divisions created through onboarding show
  * up automatically on next fetch, same as task boards per divisi.
+ *
+ * Server components (and the worker/API-adjacent code paths) run inside the
+ * `web` container, where a relative path like "/api" has no origin to
+ * resolve against - `fetch("/api/...")` throws there, which this file used
+ * to swallow in every caller's `.catch(() => [])`, rendering a dashboard
+ * that always looked empty. On the server, talk to the API directly over
+ * the Docker network via API_URL (set at runtime, see docker-compose.prod
+ * .yml); in the browser, keep using the same-origin "/api" path that Next's
+ * rewrite forwards to the API container.
  */
-const BASE = process.env.NEXT_PUBLIC_API_URL ?? "/api";
+const BASE =
+  typeof window === "undefined"
+    ? process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://api:4000"
+    : process.env.NEXT_PUBLIC_API_URL ?? "/api";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
