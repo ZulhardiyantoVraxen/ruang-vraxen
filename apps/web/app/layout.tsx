@@ -1,18 +1,47 @@
 import type { ReactNode } from "react";
+import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
 
-export const metadata = { title: "Agentic AI Platform" };
+const plexSans = IBM_Plex_Sans({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-sans" });
+const plexMono = IBM_Plex_Mono({ subsets: ["latin"], weight: ["400", "500"], variable: "--font-mono" });
+
+export const metadata = { title: "Kantor Virtual · Agentic AI Platform" };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="id">
-      <body style={{ fontFamily: "system-ui, sans-serif", margin: 0, background: "#0f172a", color: "#e2e8f0" }}>
-        <nav style={{ display: "flex", gap: 16, padding: "12px 20px", borderBottom: "1px solid #1e293b" }}>
-          <a href="/" style={{ color: "#e2e8f0", fontWeight: 600 }}>Kantor</a>
-          <a href="/divisions/new" style={{ color: "#94a3b8" }}>+ Divisi Baru</a>
-          <a href="/tasks" style={{ color: "#94a3b8" }}>Task Board</a>
-          <a href="/approvals" style={{ color: "#94a3b8" }}>Approval</a>
+    <html lang="id" className={`${plexSans.variable} ${plexMono.variable}`}>
+      <body
+        style={{
+          margin: 0,
+          fontFamily: "var(--font-sans), system-ui, sans-serif",
+          background: "#0b1420",
+          color: "#e8edf2",
+          minHeight: "100vh",
+        }}
+      >
+        <nav
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 20,
+            padding: "14px 24px",
+            borderBottom: "1px solid #1c2b3a",
+            background: "#0d1826",
+          }}
+        >
+          <a href="/" style={{ color: "#e8edf2", fontWeight: 600, textDecoration: "none", letterSpacing: "0.01em" }}>
+            Kantor Virtual
+          </a>
+          <a href="/divisions/new" style={{ color: "#8696a8", textDecoration: "none", fontSize: 14 }}>
+            + Divisi baru
+          </a>
+          <a href="/tasks" style={{ color: "#8696a8", textDecoration: "none", fontSize: 14 }}>
+            Task board
+          </a>
+          <a href="/approvals" style={{ color: "#8696a8", textDecoration: "none", fontSize: 14 }}>
+            Approval
+          </a>
         </nav>
-        <main style={{ padding: 24 }}>{children}</main>
+        <main>{children}</main>
       </body>
     </html>
   );
