@@ -1,0 +1,11 @@
+# Tambahkan ke /etc/caddy/Caddyfile yang SUDAH ADA di VPS (jangan timpa, cuma append).
+# Caddy akan otomatis urus sertifikat HTTPS untuk kedua subdomain ini begitu DNS-nya aktif,
+# sama seperti yang sudah terjadi untuk mcp.vraxen-group.com.
+
+api.vraxen-group.com {
+    reverse_proxy 127.0.0.1:4000
+}
+
+app.vraxen-group.com {
+    reverse_proxy 127.0.0.1:3000
+}

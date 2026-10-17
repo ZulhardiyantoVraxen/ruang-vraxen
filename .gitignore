@@ -4,6 +4,9 @@ build/
 .next/
 .env
 .env.local
+.env.prod
+infra/.env.prod
 *.log
 .DS_Store
 pnpm-lock.yaml
+secrets/*.txt

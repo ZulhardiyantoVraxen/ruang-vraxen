@@ -138,6 +138,77 @@ Isi `OPENROUTER_API_KEY` di `apps/api/.env` (dari https://openrouter.ai/keys) se
 mencoba alur onboarding — itu satu-satunya kredensial yang dibutuhkan untuk memanggil model,
 baik versi gratis maupun berbayar.
 
+## VPS: apa yang diperlukan untuk menjalankan mesin agentic AI-nya
+
+Dicek langsung lewat koneksi MCP ke VPS Vraxen (Hostinger KVM2): **2 vCPU AMD EPYC, 7.8GB RAM
+(0 swap), 94GB disk kosong, Ubuntu 24.04, Docker 29.9.1 sudah terpasang, Caddy sudah jalan**
+(saat ini reverse-proxy `mcp.vraxen-group.com` -> `127.0.0.1:8831` untuk MCP server yang sudah
+ada). Tidak perlu VPS baru - semua di bawah ini jalan di box yang sama.
+
+### Yang perlu ditambahkan di VPS
+
+1. **`infra/docker-compose.prod.yml`** (sudah dibuat di repo ini) - menjalankan Postgres, Redis,
+   Kafka, MinIO, `api`, `worker` (bisa di-scale `--scale worker=2`), dan `web`, semua di satu
+   docker network internal. **Tidak ada database/queue yang di-expose ke publik** - port
+   Postgres/Redis/Kafka/MinIO sengaja tidak di-publish ke host, prinsip yang sama seperti MCP
+   server (bind internal, satu pintu lewat Caddy).
+2. **`apps/api/Dockerfile`, `apps/worker/Dockerfile`, `apps/web/Dockerfile`** (sudah dibuat) -
+   multi-stage build, image hasil akhir kecil (`node:20-slim`, tanpa source TypeScript/devDeps).
+3. **Dua subdomain baru + HTTPS** - tambahkan `infra/Caddyfile.snippet` ke
+   `/etc/caddy/Caddyfile` yang sudah ada di VPS (append, jangan timpa):
+   - `api.vraxen-group.com` -> `api` container (port 4000)
+   - `app.vraxen-group.com` -> `web` container (port 3000)
+
+   Caddy otomatis terbitkan sertifikat Let's Encrypt begitu DNS A record-nya aktif, sama seperti
+   yang sudah terjadi untuk `mcp.vraxen-group.com`.
+4. **Secrets** - isi `infra/secrets/postgres_password.txt`, `infra/secrets/minio_password.txt`,
+   dan `infra/.env.prod` (dari `.env.prod.example`) **langsung di VPS**, jangan pernah di-commit
+   ke git (sudah di-`.gitignore`). `OPENROUTER_API_KEY` wajib diisi sebelum worker bisa jalan.
+
+### Muat di 7.8GB RAM?
+
+Budget memori per service (dipasang eksplisit lewat `mem_limit` di compose supaya satu service
+yang bocor memori tidak menghabiskan semuanya):
+
+| Service | Limit | Catatan |
+|---|---|---|
+| Postgres | 512MB | cukup untuk skala awal |
+| Redis | 128MB | cache + pub/sub, ringan |
+| Kafka (KRaft) | 768MB | JVM heap dipatok 512MB eksplisit (`KAFKA_HEAP_OPTS`) - default-nya bisa minta ~2GB di box ini kalau tidak dibatasi |
+| MinIO | 256MB | |
+| `api` | 384MB | |
+| `worker` x2 | 256MB x2 | naikkan jumlah replika kalau task volume naik |
+| `web` | 384MB | |
+| **Total** | **~3GB** | dari 7.8GB tersedia - sisa ~4.8GB untuk OS, Caddy, MCP server yang sudah ada, dan buffer lonjakan |
+
+**Yang perlu dilakukan sebelum deploy:** VPS ini belum punya swap sama sekali (`Swap: 0B`).
+Dengan Kafka (JVM) + beberapa proses Node berjalan bersamaan, tambahkan swap 2-4GB sebagai
+jaring pengaman (`fallocate -l 4G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile`,
+lalu masukkan ke `/etc/fstab` biar permanen) - bukan untuk dipakai terus-menerus, tapi supaya
+box tidak langsung OOM-kill proses kalau ada lonjakan sesaat.
+
+**2 vCPU adalah titik paling sempit**, bukan RAM. Untuk jumlah divisi/agent kecil-menengah
+(skala awal sesuai roadmap - 4-5 divisi, puluhan task paralel) ini cukup. Begitu banyak divisi
+jalan bersamaan dengan task volume tinggi (banyak panggilan OpenRouter + QA paralel), CPU akan
+jadi bottleneck duluan sebelum RAM habis - saat itu baru perlu pertimbangkan upgrade ke KVM4
+(4 vCPU) atau pindahkan Postgres ke managed database supaya VPS cuma menjalankan Kafka + Node.
+
+### Urutan deploy (ringkas)
+
+```bash
+ssh vraxen
+git clone https://github.com/ZulhardiyantoVraxen/ruang-vraxen.git /opt/ruang-vraxen
+cd /opt/ruang-vraxen/infra
+mkdir -p secrets
+openssl rand -base64 24 > secrets/postgres_password.txt
+openssl rand -base64 24 > secrets/minio_password.txt
+cp .env.prod.example .env.prod   # lalu isi OPENROUTER_API_KEY dan password yang sama dengan secrets/ di atas
+docker compose -f docker-compose.prod.yml up -d --build --scale worker=2
+pnpm --filter @platform/db prisma migrate deploy   # jalan dari dalam container api, atau sekali dari lokal dengan DATABASE_URL yang di-tunnel
+```
+
+Tambahkan isi `Caddyfile.snippet` ke `/etc/caddy/Caddyfile`, lalu `systemctl reload caddy`.
+
 ## Yang belum ada / langkah lanjutan
 
 Ini scaffold struktural, bukan implementasi penuh. Yang sengaja belum dibangun:

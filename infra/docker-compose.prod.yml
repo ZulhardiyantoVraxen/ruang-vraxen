@@ -1,0 +1,105 @@
+# Production compose for the VPS (2 vCPU / 7.8GB RAM Hostinger KVM2, confirmed via
+# the MCP connector - same box already running Caddy + the VPS MCP server on :8831).
+#
+# Security: only `api` and `web` are reachable from outside the docker network, and
+# only through Caddy (see Caddyfile.snippet below) - Postgres/Redis/Kafka/MinIO have
+# NO published host ports, same principle as the existing MCP server (bind internal,
+# let Caddy be the only public door). Memory limits are sized to leave real headroom
+# on a box with no swap configured yet (see README section "VPS: apa yang diperlukan").
+name: ruang-vraxen
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: platform
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_DB: platform
+    secrets: [postgres_password]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    mem_limit: 512m
+    networks: [internal]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    mem_limit: 128m
+    networks: [internal]
+
+  kafka:
+    image: bitnami/kafka:3.8
+    restart: unless-stopped
+    environment:
+      KAFKA_CFG_NODE_ID: 0
+      KAFKA_CFG_PROCESS_ROLES: controller,broker
+      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 0@kafka:9093
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+      # JVM default heap would be 1/4 of container-visible host RAM (~2GB) - far too
+      # much for this box once Postgres/Node processes are also running. Pin it down.
+      KAFKA_HEAP_OPTS: "-Xmx512m -Xms512m"
+    volumes: ["kafkadata:/bitnami/kafka"]
+    mem_limit: 768m
+    networks: [internal]
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: platform
+      MINIO_ROOT_PASSWORD_FILE: /run/secrets/minio_password
+    secrets: [minio_password]
+    volumes: ["miniodata:/data"]
+    mem_limit: 256m
+    networks: [internal]
+    # Console (:9001) intentionally not published - reach it via `ssh -L 9001:127.0.0.1:9001 vraxen`
+    # when needed, same pattern already used for other admin UIs on this box.
+
+  api:
+    build: { context: .., dockerfile: apps/api/Dockerfile }
+    restart: unless-stopped
+    env_file: .env.prod
+    depends_on: [postgres, redis, kafka]
+    mem_limit: 384m
+    networks: [internal]
+    ports: ["127.0.0.1:4000:4000"] # Caddy proxies to this; not reachable from outside the box directly
+
+  worker:
+    build: { context: .., dockerfile: apps/worker/Dockerfile }
+    restart: unless-stopped
+    env_file: .env.prod
+    depends_on: [postgres, kafka, api]
+    mem_limit: 256m
+    networks: [internal]
+    # Run with `docker compose -f docker-compose.prod.yml up -d --scale worker=2` -
+    # `replicas:` needs Swarm mode, plain `docker compose` doesn't support it. Each
+    # replica joins the same Kafka consumer group, so they split task.assigned
+    # events automatically; raise the count once real task volume is known.
+
+  web:
+    build: { context: .., dockerfile: apps/web/Dockerfile }
+    restart: unless-stopped
+    environment:
+      API_URL: http://api:4000
+    depends_on: [api]
+    mem_limit: 384m
+    networks: [internal]
+    ports: ["127.0.0.1:3000:3000"] # Caddy proxies to this
+
+networks:
+  internal:
+
+volumes:
+  pgdata:
+  kafkadata:
+  miniodata:
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password.txt
+  minio_password:
+    file: ./secrets/minio_password.txt
