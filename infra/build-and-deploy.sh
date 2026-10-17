@@ -51,11 +51,30 @@ echo "==> Staging dist-only artifacts (pnpm deploy --prod inlines workspace deps
 pnpm --filter @platform/api deploy --prod --legacy "$STAGE_DIR/api"
 pnpm --filter @platform/worker deploy --prod --legacy "$STAGE_DIR/worker"
 
-mkdir -p "$STAGE_DIR/web/.next"
+# `pnpm deploy` reinstalls @prisma/client fresh from the content-addressable
+# store - it does NOT carry over the query-engine binary + generated client
+# code that `prisma generate` produces (that's written as a side effect into
+# a specific node_modules location, not something pnpm's pack/deploy logic
+# knows to preserve). So regenerate it in place, inside each staged
+# node_modules, using a temporary copy of the schema - removed right after,
+# nothing but the generated client output remains.
+echo "==> Regenerating Prisma Client inside each staged node_modules"
+for TARGET in "$STAGE_DIR/api" "$STAGE_DIR/worker"; do
+  mkdir -p "$TARGET/prisma"
+  cp packages/db/prisma/schema.prisma "$TARGET/prisma/schema.prisma"
+  (cd "$TARGET" && npx -y prisma@5.22.0 generate --schema=prisma/schema.prisma)
+  rm -rf "$TARGET/prisma"
+done
+
+# Next.js standalone output for a monorepo app nests the entry point at
+# apps/<app>/server.js (mirroring the workspace path), not at the standalone
+# root - and .next/static + public are deliberately excluded from standalone,
+# so they're copied in at that same nested path.
+mkdir -p "$STAGE_DIR/web/apps/web/.next"
 cp -r apps/web/.next/standalone/. "$STAGE_DIR/web/"
-cp -r apps/web/.next/static "$STAGE_DIR/web/.next/static"
+cp -r apps/web/.next/static "$STAGE_DIR/web/apps/web/.next/static"
 if [ -d apps/web/public ]; then
-  cp -r apps/web/public "$STAGE_DIR/web/public"
+  cp -r apps/web/public "$STAGE_DIR/web/apps/web/public"
 fi
 
 echo "==> Building Docker images from staged artifacts only (build context has no source)"
