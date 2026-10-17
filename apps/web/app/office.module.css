@@ -84,6 +84,12 @@
 
 .stage3d {
   position: relative;
+  /* must be a definite height, not just min-height: the R3F canvas inside
+     sizes itself from its wrapper's height:100%, which only resolves
+     against a definite (not auto/min-height-only) parent height - with
+     only min-height here, the canvas's ResizeObserver read back height 0
+     and the <canvas> fell back to its native 150px default. */
+  height: 560px;
   min-height: 560px;
   border-radius: 16px;
   border: 1px solid #1c2b3a;
