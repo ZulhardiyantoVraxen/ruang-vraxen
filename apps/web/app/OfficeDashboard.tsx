@@ -40,12 +40,25 @@ type FlatAgent = Agent & { role: string; division: string; tier: string; require
 // rooms themselves still need real breathing room between their projected
 // diamond outlines after the 55deg/45deg isometric tilt, or the floors read
 // as touching even though nothing actually overlaps.
+//
+// Room aspect ratio matters more than it looks: a wide-but-short box (we
+// first tried Pusat as a 788x260 bar spanning the top) projects, after the
+// isometric tilt, into a long THIN diagonal strip - almost none of its own
+// upright (billboarded) label ends up inside that strip, so the clip above
+// hides most of the content even though nothing is actually wrong with it.
+// Keeping every room close to the same squarish aspect ratio as the other
+// four is what makes the clip behave - so Pusat gets the same footprint,
+// just centered above the 2x2 grid instead of spanning it.
+const ROOM_W = 369;
+const ROOM_H = 300;
+const GRID_GAP_X = 50;
+const GRID_GAP_Y = 60;
 const FIXED_LAYOUT: Record<string, { x: number; y: number; w: number; h: number }> = {
-  pusat: { x: 0, y: 0, w: 788, h: 260 },
-  software: { x: 0, y: 360, w: 369, h: 300 },
-  konten: { x: 419, y: 360, w: 369, h: 300 },
-  konstruksi: { x: 0, y: 730, w: 369, h: 300 },
-  kesehatan: { x: 419, y: 730, w: 369, h: 300 },
+  pusat: { x: (ROOM_W * 2 + GRID_GAP_X - ROOM_W) / 2, y: 0, w: ROOM_W, h: ROOM_H },
+  software: { x: 0, y: ROOM_H + GRID_GAP_Y, w: ROOM_W, h: ROOM_H },
+  konten: { x: ROOM_W + GRID_GAP_X, y: ROOM_H + GRID_GAP_Y, w: ROOM_W, h: ROOM_H },
+  konstruksi: { x: 0, y: (ROOM_H + GRID_GAP_Y) * 2, w: ROOM_W, h: ROOM_H },
+  kesehatan: { x: ROOM_W + GRID_GAP_X, y: (ROOM_H + GRID_GAP_Y) * 2, w: ROOM_W, h: ROOM_H },
 };
 
 const THEME: Record<string, { floor: string; floorDark: string }> = {
