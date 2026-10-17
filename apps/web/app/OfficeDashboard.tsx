@@ -41,11 +41,11 @@ type FlatAgent = Agent & { role: string; division: string; tier: string; require
 // diamond outlines after the 55deg/45deg isometric tilt, or the floors read
 // as touching even though nothing actually overlaps.
 const FIXED_LAYOUT: Record<string, { x: number; y: number; w: number; h: number }> = {
-  pusat: { x: 0, y: 0, w: 788, h: 160 },
-  software: { x: 0, y: 234, w: 369, h: 300 },
-  konten: { x: 419, y: 234, w: 369, h: 300 },
-  konstruksi: { x: 0, y: 604, w: 369, h: 300 },
-  kesehatan: { x: 419, y: 604, w: 369, h: 300 },
+  pusat: { x: 0, y: 0, w: 788, h: 260 },
+  software: { x: 0, y: 360, w: 369, h: 300 },
+  konten: { x: 419, y: 360, w: 369, h: 300 },
+  konstruksi: { x: 0, y: 730, w: 369, h: 300 },
+  kesehatan: { x: 419, y: 730, w: 369, h: 300 },
 };
 
 const THEME: Record<string, { floor: string; floorDark: string }> = {
@@ -114,7 +114,7 @@ function computeLayout(divisions: Division[]) {
   const startY = maxY > 0 ? maxY + 60 : 0;
   for (const d of extra) {
     const x = col === 0 ? 0 : 419;
-    const y = startY + row * 360;
+    const y = startY + row * 370;
     rects[d.slug] = { x, y, w: 369, h: 300 };
     maxY = Math.max(maxY, y + 300);
     col = (col + 1) % 2;
@@ -135,7 +135,7 @@ export default function OfficeDashboard({ divisions, approvals }: { divisions: D
   const [tab, setTab] = useState<"crew" | "stats" | "flow">("crew");
   const [selected, setSelected] = useState<FlatAgent | null>(null);
   const [rotation, setRotation] = useState(0);
-  const [zoom, setZoom] = useState(1);
+  const [zoom, setZoom] = useState(0.72);
   const [dragStart, setDragStart] = useState<{ x: number; rotation: number } | null>(null);
 
   const allAgents: FlatAgent[] = useMemo(
@@ -174,7 +174,7 @@ export default function OfficeDashboard({ divisions, approvals }: { divisions: D
   }
   function onWheel(e: WheelEvent<HTMLDivElement>) {
     e.preventDefault();
-    setZoom((z) => clamp(z - e.deltaY * 0.0012, 0.55, 1.35));
+    setZoom((z) => clamp(z - e.deltaY * 0.0012, 0.4, 1.35));
   }
 
   const totalZ = 45 + rotation;
