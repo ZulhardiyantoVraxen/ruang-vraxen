@@ -29,6 +29,7 @@ services:
     volumes: ["pgdata:/var/lib/postgresql/data"]
     mem_limit: 512m
     networks: [internal]
+    ports: ["127.0.0.1:5432:5432"] # loopback-only, same risk profile as api/web below - needed to run `prisma migrate` from the host
 
   redis:
     image: redis:7-alpine

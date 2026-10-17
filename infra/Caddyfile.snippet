@@ -1,11 +1,15 @@
 # Tambahkan ke /etc/caddy/Caddyfile yang SUDAH ADA di VPS (jangan timpa, cuma append).
-# Caddy akan otomatis urus sertifikat HTTPS untuk kedua subdomain ini begitu DNS-nya aktif,
-# sama seperti yang sudah terjadi untuk mcp.vraxen-group.com.
-
-api.vraxen-group.com {
-    reverse_proxy 127.0.0.1:4000
-}
-
-app.vraxen-group.com {
+# Caddy otomatis urus sertifikat HTTPS begitu DNS-nya aktif, sama seperti mcp.vraxen-group.com.
+#
+# Hanya coworking.vraxen-group.com yang DNS-nya sudah di-set (dicek via `dig`: 187.77.116.1).
+# api.vraxen-group.com dan app.vraxen-group.com BELUM punya DNS record sama sekali, jadi
+# tidak dipakai di sini - kalau Caddy dikonfigurasi untuk domain yang DNS-nya belum nunjuk ke
+# VPS ini, ACME (Let's Encrypt) akan gagal terus-menerus dan bisa kena rate limit.
+#
+# apps/web sudah punya rewrite bawaan Next.js (/api/:path* -> API_URL, di compose diarahkan
+# ke http://api:4000) jadi satu domain ini sudah cukup untuk web DAN api - tidak perlu
+# subdomain terpisah untuk api kecuali nanti mau dipakai dari luar (integrasi eksternal),
+# baru tambahkan DNS record + block Caddy terpisah untuk itu.
+coworking.vraxen-group.com {
     reverse_proxy 127.0.0.1:3000
 }
