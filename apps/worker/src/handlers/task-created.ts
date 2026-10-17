@@ -12,6 +12,24 @@ interface TaskCreatedPayload {
 }
 
 /**
+ * Shape of a division fetched with its roster below, typed by hand rather
+ * than inferred from the Prisma call: this keeps the .map()/.find()
+ * callbacks below from falling back to implicit `any` in an environment
+ * where `prisma generate` hasn't run against the current schema yet.
+ */
+interface DivisionWithRoster {
+  slug: string;
+  name: string;
+  description: string | null;
+  agentRoles: {
+    name: string;
+    responsibilities: string | null;
+    requiresApproval: boolean;
+    agents: { id: string }[];
+  }[];
+}
+
+/**
  * Reacts to "task.created". Every task today starts life filed against
  * Pusat with no agent attached yet - the only entry point is the
  * "PIC Chief of Staff" inbox in apps/web (POST /tasks with
@@ -38,7 +56,7 @@ export async function handleTaskCreated(taskId: string, payload: TaskCreatedPayl
   const chief = chiefRole?.agents[0];
   if (!chief) return; // no Chief of Staff seeded yet - nothing can triage this
 
-  const divisions = await prisma.division.findMany({
+  const divisions: DivisionWithRoster[] = await prisma.division.findMany({
     where: { status: "ACTIVE" },
     include: { agentRoles: { include: { agents: true } } },
   });
@@ -51,7 +69,7 @@ export async function handleTaskCreated(taskId: string, payload: TaskCreatedPayl
     const prompt = chiefOfStaffTriagePrompt({
       taskTitle: task.title,
       taskDescription: task.description,
-      divisions: divisions.map((d) => ({
+      divisions: divisions.map((d: DivisionWithRoster) => ({
         slug: d.slug,
         name: d.name,
         description: d.description,
