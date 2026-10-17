@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from "@nestjs/comm
 import { PrismaService } from "../prisma/prisma.service";
 import { KafkaService } from "../kafka/kafka.service";
 import { TOPICS } from "@platform/shared";
-import { CreateTaskDto } from "./dto";
+import { CreateTaskDto, TriageTaskDto } from "./dto";
 
 /**
  * One division running several jobs at once = several Task rows with the
@@ -53,6 +53,35 @@ export class TasksService {
       where: { id: taskId },
       data: { resultSummary, resultObjectKey, status: "REVIEW" },
     });
+  }
+
+  /**
+   * Chief of Staff's own triage decision, materialized: every task today
+   * starts life filed against Pusat with no agent attached (see the
+   * "PIC Chief of Staff" inbox in apps/web) - this is apps/worker (which
+   * calls the ATAS-tier model to decide) telling us where it actually
+   * belongs. Moving divisions is just re-pointing divisionId; handing it to
+   * an agent reuses the normal `assign` path below, which is what starts
+   * the usual executor flow (apps/worker's task.assigned handler).
+   */
+  async triage(taskId: string, dto: TriageTaskDto) {
+    const division = await this.prisma.division.findUniqueOrThrow({ where: { slug: dto.divisionSlug } });
+    const task = await this.prisma.task.findUniqueOrThrow({ where: { id: taskId } });
+    await this.prisma.task.update({
+      where: { id: taskId },
+      data: {
+        divisionId: division.id,
+        description: dto.reasoning
+          ? [task.description, `[Triase Chief of Staff] ${dto.reasoning}`].filter(Boolean).join("\n\n")
+          : task.description,
+      },
+    });
+    await this.kafka.publish(TOPICS.TASK_EVENTS, {
+      eventType: "task.triaged",
+      aggregateId: taskId,
+      payload: { divisionId: division.id, divisionSlug: dto.divisionSlug, reasoning: dto.reasoning },
+    });
+    return this.assign(taskId, dto.agentId, "EXECUTOR");
   }
 
   async assign(taskId: string, agentId: string, role: "EXECUTOR" | "REVIEWER") {

@@ -2,6 +2,7 @@ import { Kafka } from "kafkajs";
 import { config } from "./config";
 import { TOPICS, PlatformEvent } from "@platform/shared";
 import { handleTaskAssigned, TaskAssignedPayload } from "./handlers/task-assigned";
+import { handleTaskCreated, TaskCreatedPayload } from "./handlers/task-created";
 
 const kafka = new Kafka({ clientId: "platform-worker", brokers: config.kafkaBrokers });
 const consumer = kafka.consumer({ groupId: "platform-worker" });
@@ -22,11 +23,15 @@ async function main() {
 
       try {
         switch (event.eventType) {
+          case "task.created":
+            await handleTaskCreated(event.aggregateId, event.payload as TaskCreatedPayload);
+            break;
           case "task.assigned":
             await handleTaskAssigned(event.aggregateId, event.payload as TaskAssignedPayload);
             break;
-          // task.qa.* / task.approval.* / task.completed are informational here -
-          // nothing in the worker needs to react to its own downstream events.
+          // task.qa.* / task.approval.* / task.completed / task.triaged are
+          // informational here - nothing in the worker needs to react to
+          // its own downstream events.
           default:
             break;
         }

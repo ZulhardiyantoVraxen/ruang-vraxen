@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, Patch, Post } from "@nestjs/common";
 import { TasksService } from "./tasks.service";
-import { CreateTaskDto } from "./dto";
+import { CreateTaskDto, TriageTaskDto } from "./dto";
 
 @Controller("tasks")
 export class TasksController {
@@ -16,6 +16,11 @@ export class TasksController {
 
   @Post(":id/assign") assign(@Param("id") id: string, @Body() body: { agentId: string; role: "EXECUTOR" | "REVIEWER" }) {
     return this.service.assign(id, body.agentId, body.role);
+  }
+
+  /** Called by apps/worker once Chief of Staff's AI call decides where a task actually belongs. */
+  @Post(":id/triage") triage(@Param("id") id: string, @Body() dto: TriageTaskDto) {
+    return this.service.triage(id, dto);
   }
 
   @Post(":id/qa-failed") qaFailed(@Param("id") id: string) {

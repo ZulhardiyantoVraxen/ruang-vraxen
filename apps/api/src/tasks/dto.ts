@@ -8,3 +8,10 @@ export class CreateTaskDto {
   @IsOptional() @IsInt() @Min(1) priority?: number;
   @IsOptional() @IsBoolean() requiresApproval?: boolean;
 }
+
+/** Chief of Staff's own routing decision - which division/agent actually gets the task. */
+export class TriageTaskDto {
+  @IsString() divisionSlug!: string;
+  @IsString() agentId!: string;
+  @IsOptional() @IsString() reasoning?: string;
+}
