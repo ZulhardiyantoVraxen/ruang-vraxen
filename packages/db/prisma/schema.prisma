@@ -1,0 +1,288 @@
+// ---------------------------------------------------------------------------
+// Agentic AI Platform - core schema
+//
+// Design goals (per user spec):
+// 1. Divisions are DATA, not code. New divisions (and new roles inside them)
+//    are created at runtime through the onboarding flow - nothing here is a
+//    hardcoded enum of "Software / Konten / Konstruksi / Kesehatan".
+// 2. One division can run several Tasks at once, and a Task can fan out into
+//    subtasks (parentTaskId) handled by different agents in parallel.
+// 3. Every AgentRole carries a Tingkat (ModelTier: ATAS / AHLI / RUTIN) that
+//    maps to a ModelClass, which in turn maps to a free AND a paid OpenRouter
+//    model slug - the switch between them is a per-division/per-agent setting,
+//    not a code change.
+// 4. Everything that must roll up for human approval (per the "Alur Kerja
+//    Startup Virtual" artifact) is modeled explicitly via Task.requiresApproval
+//    + Approval, not left to agent judgement.
+// ---------------------------------------------------------------------------
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// --- Tiering & model routing -----------------------------------------------
+
+enum ModelTier {
+  ATAS   // Premium - titik keputusan & penalaran kritis (PM, Chief of Staff, Auditor)
+  AHLI   // Menengah-premium - terutama kode & angka (Developer, QA, Estimator, dll)
+  RUTIN  // Murah/cepat - kerja volume tinggi (riset, publish, rekap, dsb)
+}
+
+// A ModelClass is the *policy* for a tier (not a single hardcoded model):
+// which OpenRouter model id to use in free mode vs paid mode, and whether a
+// zero-data-retention provider is required (e.g. healthcare / PDP-sensitive work).
+model ModelClass {
+  id                     String       @id @default(cuid())
+  tier                   ModelTier    @unique
+  label                  String       // e.g. "Premium (Claude Sonnet/Opus atau setara)"
+  openRouterModelFree    String?      // e.g. "meta-llama/llama-3.3-70b-instruct:free"
+  openRouterModelPaid    String       // e.g. "anthropic/claude-sonnet-4.5"
+  requiresZeroRetention  Boolean      @default(false)
+  notes                  String?
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
+
+  agentRoles             AgentRole[]
+}
+
+// --- Divisions & roster (fully dynamic) -------------------------------------
+
+enum DivisionStatus {
+  ONBOARDING   // interactive setup in progress, not live yet
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+model Division {
+  id              String          @id @default(cuid())
+  slug            String          @unique
+  name            String
+  description     String?
+  status          DivisionStatus  @default(ONBOARDING)
+  // free-form domain metadata gathered during onboarding (industry, compliance
+  // needs such as PDP/zero-retention, working hours, etc.) - kept as JSON so
+  // new divisions never need a migration just to add a field.
+  metadata        Json?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  agentRoles      AgentRole[]
+  tasks           Task[]
+  costCaps        CostCap[]
+  onboarding      DivisionOnboardingSession[]
+
+  @@index([status])
+}
+
+// A role template inside a division, e.g. "PM Konten", "QA / Reviewer".
+// Dynamic: created by the orchestrator (or a human) per division, not an enum.
+model AgentRole {
+  id                  String      @id @default(cuid())
+  divisionId          String
+  division            Division    @relation(fields: [divisionId], references: [id], onDelete: Cascade)
+  name                String      // e.g. "Developer", "Estimator"
+  tier                ModelTier
+  modelClassId        String
+  modelClass          ModelClass  @relation(fields: [modelClassId], references: [id])
+  responsibilities    String?
+  maxConcurrentTasks  Int         @default(1) // how many tasks this role may run in parallel
+  requiresApproval    Boolean     @default(false) // this role's output always needs a human gate
+  createdAt           DateTime    @default(now())
+
+  agents              Agent[]
+
+  @@unique([divisionId, name])
+}
+
+enum AgentStatus {
+  IDLE
+  WORKING
+  REVIEWING
+  COLLABORATING
+  PAUSED
+}
+
+enum ModelVariant {
+  FREE
+  PAID
+}
+
+// A live agent instance filling an AgentRole. Several Agent rows can exist
+// for one role (scale a busy role horizontally) and one Agent can hold
+// several concurrent TaskAssignments up to its role's maxConcurrentTasks.
+model Agent {
+  id              String        @id @default(cuid())
+  agentRoleId     String
+  agentRole       AgentRole     @relation(fields: [agentRoleId], references: [id], onDelete: Cascade)
+  displayName     String
+  status          AgentStatus   @default(IDLE)
+  modelVariant    ModelVariant  @default(FREE) // which OpenRouter variant this agent currently runs on
+  systemPrompt    String?       @db.Text
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  assignments     TaskAssignment[]
+  usageLogs       UsageLog[]
+  costCaps        CostCap[]
+
+  @@index([status])
+}
+
+// --- Work: tasks, parallel subtasks, QA, approvals --------------------------
+
+enum TaskStatus {
+  TRIAGE
+  TODO
+  SCHEDULED
+  READY
+  RUNNING
+  BLOCKED
+  REVIEW
+  APPROVAL_PENDING
+  DONE
+  REJECTED
+}
+
+model Task {
+  id                 String      @id @default(cuid())
+  divisionId         String
+  division           Division    @relation(fields: [divisionId], references: [id], onDelete: Cascade)
+  parentTaskId       String?     // set -> this is a subtask running in parallel with siblings
+  parentTask         Task?       @relation("TaskSubtasks", fields: [parentTaskId], references: [id], onDelete: Cascade)
+  subtasks           Task[]      @relation("TaskSubtasks")
+
+  title              String
+  description        String?     @db.Text
+  status             TaskStatus  @default(TRIAGE)
+  priority           Int         @default(3) // 1 (highest) - 5 (lowest)
+  requiresApproval   Boolean     @default(false) // from the division's "wajib naik" rules
+  revisionCount      Int         @default(0)     // QA <-> Spesialis loop counter
+  maxRevisions       Int         @default(3)     // hard stop for the loop (Catatan Penting di sheet)
+
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  assignments        TaskAssignment[]
+  approvals          Approval[]
+  usageLogs          UsageLog[]
+
+  @@index([divisionId, status])
+  @@index([parentTaskId])
+}
+
+enum AssignmentRole {
+  EXECUTOR
+  REVIEWER
+}
+
+// Links a task (or subtask) to the agent executing/reviewing it. A task can
+// have several active assignments at once only across its subtasks - a single
+// task row itself is owned by one executor at a time, which is what keeps the
+// "revisionCount" loop meaningful.
+model TaskAssignment {
+  id          String          @id @default(cuid())
+  taskId      String
+  task        Task            @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  agentId     String
+  agent       Agent           @relation(fields: [agentId], references: [id])
+  role        AssignmentRole
+  assignedAt  DateTime        @default(now())
+  completedAt DateTime?
+
+  @@index([taskId])
+  @@index([agentId])
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// Human-in-the-loop gate. approverRef is free text on purpose (a user id, an
+// external reviewer's name/email) so this never needs a hard FK to an auth
+// system that may change.
+model Approval {
+  id            String          @id @default(cuid())
+  taskId        String
+  task          Task            @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  requestedAt   DateTime        @default(now())
+  status        ApprovalStatus  @default(PENDING)
+  approverRef   String?
+  decidedAt     DateTime?
+  notes         String?
+
+  @@index([taskId, status])
+}
+
+// --- Cost / usage guardrails -------------------------------------------------
+
+enum CostCapScope {
+  AGENT
+  DIVISION
+  TASK
+}
+
+// "Batas biaya per agen" + "batas jumlah iterasi revisi" from Catatan Penting.
+model CostCap {
+  id              String        @id @default(cuid())
+  scope           CostCapScope
+  divisionId      String?
+  division        Division?     @relation(fields: [divisionId], references: [id], onDelete: Cascade)
+  agentId         String?
+  agent           Agent?        @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  maxCostUsd      Decimal       @db.Decimal(10, 4)
+  periodDays      Int           @default(30)
+  maxIterations   Int?          // null = no extra iteration cap beyond Task.maxRevisions
+  createdAt       DateTime      @default(now())
+}
+
+model UsageLog {
+  id              String       @id @default(cuid())
+  agentId         String
+  agent           Agent        @relation(fields: [agentId], references: [id])
+  taskId          String?
+  task            Task?        @relation(fields: [taskId], references: [id])
+  modelUsed       String       // exact OpenRouter model id actually called
+  modelVariant    ModelVariant
+  source          String       // "kanban" | "cron" | "chat" | "onboarding"
+  tokensIn        Int
+  tokensOut       Int
+  costUsd         Decimal      @db.Decimal(10, 6)
+  createdAt       DateTime     @default(now())
+
+  @@index([agentId, createdAt])
+  @@index([taskId])
+}
+
+// --- Interactive division onboarding ----------------------------------------
+
+enum OnboardingStatus {
+  IN_PROGRESS
+  RECOMMENDED
+  CONFIRMED
+  CANCELLED
+}
+
+// One row per "create a new division" conversation. The orchestrator asks
+// questions, the user answers, the AI proposes a roster (roles + tiers +
+// model classes) referencing ModelClass, and the user confirms before any
+// AgentRole/Agent rows are actually created.
+model DivisionOnboardingSession {
+  id                  String            @id @default(cuid())
+  divisionId          String?
+  division            Division?         @relation(fields: [divisionId], references: [id])
+  status              OnboardingStatus  @default(IN_PROGRESS)
+  // transcript of question/answer turns: [{ question, answer }]
+  qaLog               Json              @default("[]")
+  // AI-proposed roster before confirmation: [{ roleName, tier, responsibilities, requiresApproval }]
+  recommendedRoster   Json?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+}

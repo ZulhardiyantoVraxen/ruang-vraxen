@@ -1,0 +1,17 @@
+{
+  "name": "agentic-ai-platform",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Virtual company platform: dynamic divisions of AI agents, tiered model routing via OpenRouter, human-in-the-loop approvals",
+  "scripts": {
+    "dev:api": "pnpm --filter @platform/api dev",
+    "dev:web": "pnpm --filter @platform/web dev",
+    "db:generate": "pnpm --filter @platform/db prisma generate",
+    "db:migrate": "pnpm --filter @platform/db prisma migrate dev",
+    "infra:up": "docker compose -f infra/docker-compose.yml up -d",
+    "infra:down": "docker compose -f infra/docker-compose.yml down"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}
