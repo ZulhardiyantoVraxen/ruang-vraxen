@@ -31,6 +31,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <a href="/" style={{ color: "#e8edf2", fontWeight: 600, textDecoration: "none", letterSpacing: "0.01em" }}>
             Kantor Virtual
           </a>
+          <a href="/chief-of-staff" style={{ color: "#8696a8", textDecoration: "none", fontSize: 14 }}>
+            PIC Chief of Staff
+          </a>
           <a href="/divisions/new" style={{ color: "#8696a8", textDecoration: "none", fontSize: 14 }}>
             + Divisi baru
           </a>

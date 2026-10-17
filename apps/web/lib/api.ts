@@ -34,6 +34,13 @@ export const api = {
   pendingApprovals: () => request<any[]>("/approvals/pending"),
   decideApproval: (id: string, status: "APPROVED" | "REJECTED", approverRef: string, notes?: string) =>
     request(`/approvals/${id}/decide`, { method: "PATCH", body: JSON.stringify({ status, approverRef, notes }) }),
+  createTask: (payload: {
+    divisionSlug: string;
+    title: string;
+    description?: string;
+    priority?: number;
+    requiresApproval?: boolean;
+  }) => request<any>("/tasks", { method: "POST", body: JSON.stringify(payload) }),
   startOnboarding: (brief: string) => request<any>("/onboarding/start", { method: "POST", body: JSON.stringify({ brief }) }),
   answerOnboarding: (sessionId: string, answer: string) =>
     request<any>(`/onboarding/${sessionId}/answer`, { method: "POST", body: JSON.stringify({ answer }) }),
