@@ -1,7 +1,16 @@
 "use client";
 
 import { useMemo, useState, type PointerEvent, type WheelEvent } from "react";
+import dynamic from "next/dynamic";
 import styles from "./office.module.css";
+
+// The 3D scene pulls in three.js + @react-three/fiber, which is a sizeable
+// chunk of JS and needs a WebGL canvas - loaded only when the person
+// actually switches to the 3D view, never during SSR.
+const OfficeScene3D = dynamic(() => import("./three/OfficeScene3D"), {
+  ssr: false,
+  loading: () => <div className={styles.scene3dLoading}>Memuat kantor 3D…</div>,
+});
 
 type Agent = {
   id: string;
@@ -146,6 +155,7 @@ const FLOW_STEPS = [
 
 export default function OfficeDashboard({ divisions, approvals }: { divisions: Division[]; approvals: Approval[] }) {
   const [tab, setTab] = useState<"crew" | "stats" | "flow">("crew");
+  const [view, setView] = useState<"2d" | "3d">("3d");
   const [selected, setSelected] = useState<FlatAgent | null>(null);
   const [rotation, setRotation] = useState(0);
   const [zoom, setZoom] = useState(0.72);
@@ -222,10 +232,34 @@ export default function OfficeDashboard({ divisions, approvals }: { divisions: D
           <span className={styles.chipValue}>{approvals.length}</span>
           <span className={styles.chipLabel}>Approval</span>
         </div>
-        <p className={styles.hudSub}>{divisions.length} divisi aktif · klik agent untuk detail, seret kantor untuk melihat dari sisi lain</p>
+        <div className={styles.viewToggle}>
+          <button
+            type="button"
+            className={`${styles.viewToggleButton} ${view === "3d" ? styles.viewToggleButtonActive : ""}`}
+            onClick={() => setView("3d")}
+          >
+            3D
+          </button>
+          <button
+            type="button"
+            className={`${styles.viewToggleButton} ${view === "2d" ? styles.viewToggleButtonActive : ""}`}
+            onClick={() => setView("2d")}
+          >
+            2D
+          </button>
+        </div>
+        <p className={styles.hudSub}>
+          {divisions.length} divisi aktif · klik agent untuk detail
+          {view === "2d" ? ", seret kantor untuk melihat dari sisi lain" : ", seret untuk putar kamera · scroll untuk zoom"}
+        </p>
       </div>
 
       <div className={styles.layoutRow}>
+        {view === "3d" ? (
+          <div className={styles.stage3d}>
+            <OfficeScene3D divisions={divisions} />
+          </div>
+        ) : (
         <div
           className={styles.stage}
           onPointerDown={onPointerDown}
@@ -289,6 +323,7 @@ export default function OfficeDashboard({ divisions, approvals }: { divisions: D
           </div>
           <p className={styles.hint}>Seret untuk memutar · scroll untuk zoom</p>
         </div>
+        )}
 
         <div className={styles.panel}>
           <div className={styles.tabs}>
