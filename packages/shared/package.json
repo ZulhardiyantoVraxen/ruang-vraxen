@@ -2,7 +2,12 @@
   "name": "@platform/shared",
   "version": "0.1.0",
   "private": true,
-  "main": "src/index.ts",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
   "dependencies": {
     "openai": "^4.68.0",
     "@aws-sdk/client-s3": "^3.670.0",
