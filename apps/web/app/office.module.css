@@ -110,6 +110,14 @@
 .room {
   position: absolute;
   transform-style: preserve-3d;
+  /* The billboarded label inside (roomInner) is counter-rotated back to an
+     upright rectangle - without a clip, its corners poke out past this
+     room's own diamond-shaped on-screen silhouette and paint over whatever
+     neighboring room sits later in DOM order. Clipping here happens in the
+     room's own local (pre-rotation) box, so the clip boundary rotates
+     together with the floor and matches it exactly. */
+  overflow: hidden;
+  border-radius: 16px;
 }
 
 .roomFloor {
@@ -143,6 +151,10 @@
   color: rgba(238, 243, 247, 0.7);
   margin-top: 1px;
   max-width: 280px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .roomTags {

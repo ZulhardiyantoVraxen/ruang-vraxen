@@ -35,12 +35,17 @@ type Approval = {
 
 type FlatAgent = Agent & { role: string; division: string; tier: string; requiresApproval: boolean };
 
+// Gaps are generous on purpose: the billboarded label inside each room is
+// clipped to that room's own box (see .room in office.module.css), but the
+// rooms themselves still need real breathing room between their projected
+// diamond outlines after the 55deg/45deg isometric tilt, or the floors read
+// as touching even though nothing actually overlaps.
 const FIXED_LAYOUT: Record<string, { x: number; y: number; w: number; h: number }> = {
-  pusat: { x: 0, y: 0, w: 764, h: 168 },
-  software: { x: 0, y: 206, w: 370, h: 300 },
-  konten: { x: 394, y: 206, w: 370, h: 300 },
-  konstruksi: { x: 0, y: 544, w: 370, h: 300 },
-  kesehatan: { x: 394, y: 544, w: 370, h: 300 },
+  pusat: { x: 0, y: 0, w: 788, h: 160 },
+  software: { x: 0, y: 234, w: 369, h: 300 },
+  konten: { x: 419, y: 234, w: 369, h: 300 },
+  konstruksi: { x: 0, y: 604, w: 369, h: 300 },
+  kesehatan: { x: 419, y: 604, w: 369, h: 300 },
 };
 
 const THEME: Record<string, { floor: string; floorDark: string }> = {
@@ -106,16 +111,16 @@ function computeLayout(divisions: Division[]) {
   const extra = divisions.filter((d) => !FIXED_LAYOUT[d.slug]);
   let col = 0;
   let row = 0;
-  const startY = maxY > 0 ? maxY + 36 : 0;
+  const startY = maxY > 0 ? maxY + 60 : 0;
   for (const d of extra) {
-    const x = col === 0 ? 0 : 394;
-    const y = startY + row * 336;
-    rects[d.slug] = { x, y, w: 370, h: 300 };
+    const x = col === 0 ? 0 : 419;
+    const y = startY + row * 360;
+    rects[d.slug] = { x, y, w: 369, h: 300 };
     maxY = Math.max(maxY, y + 300);
     col = (col + 1) % 2;
     if (col === 0) row += 1;
   }
-  return { rects, planW: 764, planH: maxY };
+  return { rects, planW: 788, planH: maxY };
 }
 
 const FLOW_STEPS = [
