@@ -45,8 +45,11 @@ echo "==> Building apps/web (next build, output: standalone)"
 pnpm --filter @platform/web build
 
 echo "==> Staging dist-only artifacts (pnpm deploy --prod inlines workspace deps, prod deps only)"
-pnpm --filter @platform/api deploy --prod "$STAGE_DIR/api"
-pnpm --filter @platform/worker deploy --prod "$STAGE_DIR/worker"
+# --legacy: pnpm v10 defaults to requiring inject-workspace-packages=true for
+# `pnpm deploy`; --legacy keeps the older (still correct for our case) behavior
+# of resolving workspace deps from the pnpm store without that opt-in.
+pnpm --filter @platform/api deploy --prod --legacy "$STAGE_DIR/api"
+pnpm --filter @platform/worker deploy --prod --legacy "$STAGE_DIR/worker"
 
 mkdir -p "$STAGE_DIR/web"
 cp -r apps/web/.next/standalone/. "$STAGE_DIR/web/"
