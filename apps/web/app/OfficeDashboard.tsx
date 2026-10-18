@@ -252,11 +252,29 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
     }
   }
 
-  // Agent-detail modal: direct command to just this one person, plus the
-  // tasks actually assigned to them across every division.
+  // Agent-detail modal: a real chat thread with just this one person, plus
+  // the tasks actually assigned to them across every division. Sending a
+  // message here is plain conversation by default - the API only turns it
+  // into a Task when the message itself reads as a work order (see
+  // api.agentChat), so chatting never shows up on the Task Board.
+  type ChatLine = { id: string; role: "DIRECTOR" | "AGENT"; content: string };
+  const [modalChat, setModalChat] = useState<ChatLine[]>([]);
+  const [modalChatLoading, setModalChatLoading] = useState(false);
   const [modalCommandText, setModalCommandText] = useState("");
   const [modalCommandSending, setModalCommandSending] = useState(false);
-  const [modalCommandResult, setModalCommandResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  useEffect(() => {
+    if (!selected) {
+      setModalChat([]);
+      return;
+    }
+    setModalChatLoading(true);
+    api
+      .agentChatHistory(selected.id)
+      .then(setModalChat)
+      .catch(() => setModalChat([]))
+      .finally(() => setModalChatLoading(false));
+  }, [selected?.id]);
 
   function toggleCommandAgent(id: string) {
     setCommandSelected((prev) => {
@@ -288,28 +306,28 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
       .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
   }, [divisions, selected]);
 
-  async function sendModalCommand() {
+  async function sendModalChat() {
     if (!selected) return;
-    const instruction = modalCommandText.trim();
-    if (!instruction || modalCommandSending) return;
+    const message = modalCommandText.trim();
+    if (!message || modalCommandSending) return;
     setModalCommandSending(true);
-    setModalCommandResult(null);
+    const optimistic: ChatLine = { id: `pending-${Date.now()}`, role: "DIRECTOR", content: message };
+    setModalChat((prev) => [...prev, optimistic]);
+    setModalCommandText("");
     try {
-      const result = await api.broadcastCommand({ agentIds: [selected.id], instruction });
-      const entry = result.dispatched[0];
-      if (entry) {
-        setModalCommandResult({
-          ok: true,
-          message: entry.queued ? `${selected.displayName} sedang sibuk - perintah diantrekan.` : `Terkirim ke ${selected.displayName}.`,
-        });
+      const result = await api.agentChat(selected.id, message);
+      if (result.type === "task") {
+        setModalChat((prev) => [...prev, { id: `${optimistic.id}-reply`, role: "AGENT", content: result.note }]);
+        // A real Task was created - refresh so "Tugas" list and the office/board reflect it.
+        api.listDivisions().then(setDivisions).catch(() => {});
       } else {
-        const fail = result.failed[0];
-        setModalCommandResult({ ok: false, message: fail?.reason ?? "Gagal mengirim perintah." });
+        setModalChat((prev) => [...prev, { id: `${optimistic.id}-reply`, role: "AGENT", content: result.reply }]);
       }
-      setModalCommandText("");
-      api.listDivisions().then(setDivisions).catch(() => {});
     } catch (e) {
-      setModalCommandResult({ ok: false, message: e instanceof Error ? e.message : "Gagal mengirim perintah." });
+      setModalChat((prev) => [
+        ...prev,
+        { id: `${optimistic.id}-error`, role: "AGENT", content: e instanceof Error ? `(Gagal: ${e.message})` : "(Gagal mengirim pesan)" },
+      ]);
     } finally {
       setModalCommandSending(false);
     }
@@ -728,7 +746,6 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
           onClick={() => {
             setSelected(null);
             setModalCommandText("");
-            setModalCommandResult(null);
           }}
         >
           <div className={`${styles.modal} ${styles.modalWide}`} onClick={(e) => e.stopPropagation()}>
@@ -772,35 +789,44 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
               ))}
             </div>
 
-            <p className={styles.modalSectionTitle}>Perintah langsung ke {selected.displayName}</p>
+            <p className={styles.modalSectionTitle}>Chat dengan {selected.displayName}</p>
+            <p className={styles.modalChatHint}>
+              Obrolan biasa dibalas sebagai chat saja. Kalau pesan Anda memang berupa perintah kerja, baru dicatat sebagai
+              tugas di Task Board.
+            </p>
+            <div className={styles.modalChatThread}>
+              {modalChatLoading && <p className={styles.modalTaskEmpty}>Memuat riwayat chat…</p>}
+              {!modalChatLoading && modalChat.length === 0 && (
+                <p className={styles.modalTaskEmpty}>Belum ada percakapan. Mulai chat di bawah.</p>
+              )}
+              {modalChat.map((m) => (
+                <div
+                  key={m.id}
+                  className={`${styles.modalChatBubble} ${m.role === "DIRECTOR" ? styles.modalChatBubbleMe : styles.modalChatBubbleAgent}`}
+                >
+                  {m.content}
+                </div>
+              ))}
+            </div>
             <div className={styles.modalCommandRow}>
               <input
                 className={styles.modalCommandInput}
-                placeholder="Ketik perintah untuk agent ini saja…"
+                placeholder={`Chat dengan ${selected.displayName}…`}
                 value={modalCommandText}
                 onChange={(e) => setModalCommandText(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") sendModalCommand();
+                  if (e.key === "Enter") sendModalChat();
                 }}
               />
               <button
                 type="button"
                 className={styles.modalCommandSend}
                 disabled={!modalCommandText.trim() || modalCommandSending}
-                onClick={sendModalCommand}
+                onClick={sendModalChat}
               >
                 {modalCommandSending ? "Mengirim…" : "Kirim"}
               </button>
             </div>
-            {modalCommandResult && (
-              <p
-                className={`${styles.modalCommandFeedback} ${
-                  modalCommandResult.ok ? styles.modalCommandFeedbackOk : styles.modalCommandFeedbackFail
-                }`}
-              >
-                {modalCommandResult.message}
-              </p>
-            )}
 
             <button
               type="button"
@@ -808,7 +834,6 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
               onClick={() => {
                 setSelected(null);
                 setModalCommandText("");
-                setModalCommandResult(null);
               }}
             >
               Tutup

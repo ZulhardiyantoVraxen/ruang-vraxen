@@ -899,3 +899,43 @@
 .modalCommandFeedbackFail {
   color: #d6665b;
 }
+
+.modalChatHint {
+  font-size: 11px;
+  color: #5c7085;
+  margin: 2px 0 8px;
+  line-height: 1.4;
+}
+
+.modalChatThread {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 2px 2px 4px;
+  margin-bottom: 8px;
+}
+
+.modalChatBubble {
+  max-width: 85%;
+  padding: 7px 10px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.modalChatBubbleMe {
+  align-self: flex-end;
+  background: linear-gradient(135deg, #5fc9b8, #3d9c8f);
+  color: #06201a;
+  border-bottom-right-radius: 3px;
+}
+
+.modalChatBubbleAgent {
+  align-self: flex-start;
+  background: #152636;
+  color: #eef3f7;
+  border-bottom-left-radius: 3px;
+}

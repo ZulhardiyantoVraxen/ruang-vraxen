@@ -11,6 +11,7 @@ import { UsageModule } from "./usage/usage.module";
 import { OrchestratorModule } from "./orchestrator/orchestrator.module";
 import { QuestionsModule } from "./questions/questions.module";
 import { ProjectsModule } from "./projects/projects.module";
+import { ChatModule } from "./chat/chat.module";
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { ProjectsModule } from "./projects/projects.module";
     OrchestratorModule,
     QuestionsModule,
     ProjectsModule,
+    ChatModule,
   ],
 })
 export class AppModule {}

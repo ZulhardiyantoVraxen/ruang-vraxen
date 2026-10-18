@@ -55,6 +55,18 @@ export const api = {
       failed: { agentId: string; agentName: string; reason: string }[];
     }>("/tasks/broadcast", { method: "POST", body: JSON.stringify(payload) }),
   listProjects: () => request<any[]>("/projects"),
+  agentChatHistory: (agentId: string) => request<any[]>(`/agents/${agentId}/chat`),
+  /**
+   * Plain conversation with one agent - the API classifies the message and
+   * only creates a real Task (see `result.type === "task"`) when it reads
+   * as an actual work order, so ordinary chat never shows up on the Task
+   * Board.
+   */
+  agentChat: (agentId: string, message: string) =>
+    request<
+      | { type: "chat"; reply: string }
+      | { type: "task"; taskId: string; title: string; queued: boolean; note: string }
+    >(`/agents/${agentId}/chat`, { method: "POST", body: JSON.stringify({ message }) }),
   createProject: (name: string, description?: string) =>
     request<any>("/projects", { method: "POST", body: JSON.stringify({ name, description }) }),
   /** The director's queue of questions raised by PM/decision-point agents mid-task. */

@@ -234,41 +234,69 @@ export class TasksService {
 
     for (const agent of agents) {
       try {
-        const task = await this.prisma.task.create({
-          data: {
-            divisionId: agent.agentRole.divisionId,
-            title,
-            description: dto.instruction,
-            priority: 1, // a direct director order always jumps the queue once a slot is free
-            projectId: dto.projectId,
-            dueAt,
-          },
-        });
-        // A UI/UX brief: Analis has to weigh in before this counts as done
-        // (the "koordinasi dengan Analis" from the director's brief) and the
-        // result always rolls up to the director's own Approval queue -
-        // never bypassable via the task-level "wajib persetujuan" box, since
-        // this hand-off chain depends on it. Both are wired BEFORE the
-        // executor is assigned (which is what actually fires the worker),
-        // so the QA step is guaranteed to see the reviewer already in place.
-        if (agent.agentRole.name === ROLE_NAMES.UIUX_DESIGNER) {
-          await this.wireUiUxDesignTask(task.id, agent.agentRole.divisionId);
-        }
-        try {
-          await this.assign(task.id, agent.id, "EXECUTOR");
-          dispatched.push({ agentId: agent.id, agentName: agent.displayName, taskId: task.id, queued: false });
-        } catch (err) {
-          if (!(err instanceof BadRequestException)) throw err;
-          // Busy, not invalid - queue it instead of reporting a failure.
-          await this.prisma.taskAssignment.create({ data: { taskId: task.id, agentId: agent.id, role: "EXECUTOR" } });
-          await this.prisma.task.update({ where: { id: task.id }, data: { status: "TODO" } });
-          dispatched.push({ agentId: agent.id, agentName: agent.displayName, taskId: task.id, queued: true });
-        }
+        const result = await this.createAndAssignSingle(agent, title, dto.instruction, { priority: 1, projectId: dto.projectId, dueAt });
+        dispatched.push({ agentId: agent.id, agentName: agent.displayName, taskId: result.taskId, queued: result.queued });
       } catch (err) {
         failed.push({ agentId: agent.id, agentName: agent.displayName, reason: err instanceof Error ? err.message : "unknown error" });
       }
     }
     return { dispatched, failed };
+  }
+
+  /**
+   * Shared by `broadcast()` and ChatService's task-detection path: creates
+   * one Task for one already-chosen agent and assigns it immediately, or
+   * reserves a queued assignment if the agent is busy (see `broadcast`'s own
+   * doc comment) - never throws for "busy", only for a genuinely invalid
+   * agent/division.
+   */
+  private async createAndAssignSingle(
+    agent: { id: string; displayName: string; agentRole: { divisionId: string; name: string } },
+    title: string,
+    description: string,
+    opts: { priority?: number; projectId?: string; dueAt?: Date } = {},
+  ): Promise<{ taskId: string; queued: boolean }> {
+    const task = await this.prisma.task.create({
+      data: {
+        divisionId: agent.agentRole.divisionId,
+        title,
+        description,
+        priority: opts.priority ?? 1,
+        projectId: opts.projectId,
+        dueAt: opts.dueAt,
+      },
+    });
+    // A UI/UX brief: Analis has to weigh in before this counts as done
+    // (the "koordinasi dengan Analis" from the director's brief) and the
+    // result always rolls up to the director's own Approval queue -
+    // never bypassable via the task-level "wajib persetujuan" box, since
+    // this hand-off chain depends on it. Both are wired BEFORE the
+    // executor is assigned (which is what actually fires the worker),
+    // so the QA step is guaranteed to see the reviewer already in place.
+    if (agent.agentRole.name === ROLE_NAMES.UIUX_DESIGNER) {
+      await this.wireUiUxDesignTask(task.id, agent.agentRole.divisionId);
+    }
+    try {
+      await this.assign(task.id, agent.id, "EXECUTOR");
+      return { taskId: task.id, queued: false };
+    } catch (err) {
+      if (!(err instanceof BadRequestException)) throw err;
+      // Busy, not invalid - queue it instead of reporting a failure.
+      await this.prisma.taskAssignment.create({ data: { taskId: task.id, agentId: agent.id, role: "EXECUTOR" } });
+      await this.prisma.task.update({ where: { id: task.id }, data: { status: "TODO" } });
+      return { taskId: task.id, queued: true };
+    }
+  }
+
+  /**
+   * ChatService calls this when a chat message to an agent turns out to
+   * read as an actual work order, not conversation (see ChatService.send) -
+   * same busy-aware create+assign path as `broadcast`, just entered from a
+   * one-on-one chat instead of the office view's multi-agent command panel.
+   */
+  async createDirectCommand(agentId: string, title: string, description: string) {
+    const agent = await this.prisma.agent.findUniqueOrThrow({ where: { id: agentId }, include: { agentRole: true } });
+    return this.createAndAssignSingle(agent, title, description);
   }
 
   private async wireUiUxDesignTask(taskId: string, divisionId: string) {

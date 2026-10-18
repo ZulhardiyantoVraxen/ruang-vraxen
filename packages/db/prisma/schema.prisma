@@ -132,8 +132,32 @@ model Agent {
   usageLogs         UsageLog[]
   costCaps          CostCap[]
   directorQuestions DirectorQuestion[]
+  chatMessages      ChatMessage[]
 
   @@index([status])
+}
+
+enum ChatRole {
+  DIRECTOR
+  AGENT
+}
+
+// "Saya ingin langsung bisa chatting dengan agent, bukan memberikan tugas" -
+// a free-form conversation thread per agent, completely separate from Task.
+// Sending a message here never touches the Task Board by itself: ChatService
+// classifies each director message and only creates a real Task (via
+// TasksService.createDirectCommand) when the message actually reads as a
+// work order, in which case a short system note is appended here too so the
+// thread stays coherent even though the work itself now lives on the board.
+model ChatMessage {
+  id        String   @id @default(cuid())
+  agentId   String
+  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  role      ChatRole
+  content   String   @db.Text
+  createdAt DateTime @default(now())
+
+  @@index([agentId, createdAt])
 }
 
 // --- Work: tasks, parallel subtasks, QA, approvals --------------------------
