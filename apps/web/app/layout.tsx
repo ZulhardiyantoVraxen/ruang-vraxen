@@ -40,8 +40,18 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               letterSpacing: "0.01em",
             }}
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/vraxen-logo.png" alt="Vraxen" style={{ height: 22, width: "auto", display: "block" }} />
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                padding: "5px 12px",
+                borderRadius: 8,
+                background: "linear-gradient(180deg, #ffffff, #e7ebef)",
+              }}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/vraxen-logo.png" alt="Vraxen" style={{ height: 20, width: "auto", display: "block" }} />
+            </span>
             <span>Vraxen Virtual Office</span>
           </a>
           <a href="/chief-of-staff" style={{ color: "#8696a8", textDecoration: "none", fontSize: 14 }}>

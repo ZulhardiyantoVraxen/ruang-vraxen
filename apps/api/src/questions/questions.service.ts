@@ -75,7 +75,20 @@ export class QuestionsService {
       // that's been open since the agent paused to ask - they never gave up
       // their concurrency slot, so this must not run the normal limit check
       // (and must not create a second assignment row for the same task).
-      await this.tasks.resumeExecutor(task.id, question.agentId);
+      //
+      // "Direktur hanya koordinasi dengan Chief of Staff": a question raised
+      // on a division PM's task can be ASKED under Chief of Staff's agentId
+      // (the worker forwards it that way once it decides the director really
+      // needs to weigh in - see task-assigned.ts), so the director's queue
+      // only ever shows Chief of Staff as the asker. That means question.agentId
+      // is not necessarily the agent whose task is actually paused - the task's
+      // own still-open EXECUTOR assignment is the reliable source for who to
+      // resume, so look that up directly instead of trusting question.agentId.
+      const openExecutor = await this.prisma.taskAssignment.findFirst({
+        where: { taskId: task.id, role: "EXECUTOR", completedAt: null },
+        orderBy: { assignedAt: "desc" },
+      });
+      await this.tasks.resumeExecutor(task.id, openExecutor?.agentId ?? question.agentId);
     }
 
     return question;

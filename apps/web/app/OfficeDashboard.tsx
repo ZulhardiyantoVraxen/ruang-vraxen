@@ -433,6 +433,19 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
 
   const layout = useMemo(() => computeLayout(divisions), [divisions]);
 
+  // 3D desk columns are placed in array order, growing left (more negative X) -
+  // which is the side the Meeting Room / Ruang Direktur sits on - so later
+  // entries land closer to it. "Sekretariat Direksi" (pusat) needs to be last
+  // here so its desks sit right in front of Ruang Direktur. This reorder is
+  // ONLY for the 3D desk layout - the 2D grid (computeLayout above) and every
+  // other list keep using `divisions` in its original order.
+  const divisionsFor3D = useMemo(() => {
+    const pusatIndex = divisions.findIndex((d) => d.slug === "pusat");
+    if (pusatIndex === -1) return divisions;
+    const rest = divisions.filter((d) => d.slug !== "pusat");
+    return [...rest, divisions[pusatIndex]];
+  }, [divisions]);
+
   function onPointerDown(e: PointerEvent<HTMLDivElement>) {
     setDragStart({ x: e.clientX, rotation });
   }
@@ -507,7 +520,7 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
         {view === "3d" ? (
           <div className={styles.stage3d}>
             <OfficeScene3D
-              divisions={divisions}
+              divisions={divisionsFor3D}
               onSelectDivision={setSelectedDivisionSlug}
               selectedAgentIds={commandSelected}
               calledAgentIds={calledAgentIds}

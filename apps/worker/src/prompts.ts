@@ -97,6 +97,44 @@ export function chiefOfStaffTriagePrompt(params: {
     .join("\n");
 }
 
+/**
+ * "Direktur hanya koordinasi dengan Chief of Staff, koordinasi PM hanya
+ * sebatas sampai Chief of Staff" - when a division PM raises a question
+ * while executing a task, it goes here FIRST instead of straight to the
+ * director. Chief of Staff (also an AI agent) either settles it on the spot
+ * or decides it genuinely needs the director, and only then forwards it -
+ * under Chief of Staff's own name, never the original PM's.
+ */
+export function chiefOfStaffRelayPrompt(params: {
+  askingRoleName: string;
+  askingDivisionName: string;
+  taskTitle: string;
+  taskDescription: string | null;
+  question: string;
+}) {
+  return [
+    `Kamu adalah Chief of Staff. Semua pertanyaan dari PM divisi lain ke direktur harus lewat kamu dulu -`,
+    `direktur hanya pernah koordinasi langsung denganmu, tidak dengan PM divisi satu-satu.`,
+    ``,
+    `"${params.askingRoleName}" di divisi "${params.askingDivisionName}" sedang mengerjakan task berikut dan bertanya:`,
+    ``,
+    `Judul task: ${params.taskTitle}`,
+    params.taskDescription ? `Detail: ${params.taskDescription}` : "",
+    `Pertanyaan PM: ${params.question}`,
+    ``,
+    `Kalau ini hal yang bisa kamu jawab/putuskan sendiri sebagai Chief of Staff (kebijakan internal, prioritas`,
+    `operasional, hal yang levelmu), jawab langsung. Kalau ini genuinely butuh keputusan direktur (strategis,`,
+    `anggaran besar, atau di luar kewenanganmu), teruskan ke direktur - tulis ulang pertanyaannya seolah KAMU`,
+    `yang bertanya ke direktur (jangan menyebut nama PM aslinya, cukup "tim ${params.askingDivisionName}").`,
+    ``,
+    `Balas HANYA dengan JSON, salah satu dari dua bentuk ini, tanpa teks lain:`,
+    `{"type":"answer","answer":"..."}`,
+    `{"type":"escalate","question":"..."}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 export function reviewerPrompt(params: {
   divisionName: string;
   reviewerRoleName: string;

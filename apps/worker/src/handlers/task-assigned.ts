@@ -9,7 +9,7 @@ import {
   GitHubClient,
   extractCodeBlocks,
 } from "@platform/shared";
-import { executorPrompt, pmExecutorPrompt, reviewerPrompt } from "../prompts";
+import { executorPrompt, pmExecutorPrompt, chiefOfStaffRelayPrompt, reviewerPrompt } from "../prompts";
 
 const openRouter = new OpenRouterClient(config.openRouterApiKey);
 const objectStorage = new ObjectStorageClient(config.objectStorage);
@@ -148,14 +148,80 @@ async function runPmExecutor(
   }
 
   if (parsed.type === "question") {
-    await apiClient.askDirector({
-      agentId: agent.id,
-      divisionId: agent.agentRole.divisionId,
-      taskId: task.id,
-      question: parsed.question,
+    // "Direktur hanya koordinasi dengan Chief of Staff" - Chief of Staff's
+    // OWN questions still go straight to the (human) director, same as
+    // before. Every other PM's question is routed through Chief of Staff
+    // first (an AI-to-AI call, resolved synchronously, right here).
+    if (isChiefOfStaff(agent.agentRole.name, task.division.slug)) {
+      await apiClient.askDirector({
+        agentId: agent.id,
+        divisionId: agent.agentRole.divisionId,
+        taskId: task.id,
+        question: parsed.question,
+      });
+      await apiClient.setAgentStatus(agent.id, "IDLE");
+      return; // task is now AWAITING_DIRECTOR - resumes via QuestionsService.answer once the director replies
+    }
+
+    const relay = await relayQuestionThroughChiefOfStaff(agent, task, parsed.question);
+    if (!relay.resolved) {
+      return; // escalated to the director under Chief of Staff's name (or no Chief of Staff configured yet) - task is now AWAITING_DIRECTOR
+    }
+
+    // Chief of Staff answered directly - fold the Q&A into context and let
+    // this PM finish the SAME task right now. No pause/resume needed: this
+    // whole relay happened inside one worker invocation.
+    const followUpDescription = [
+      task.description,
+      `[Pertanyaan ke Chief of Staff] ${parsed.question}`,
+      `[Jawaban Chief of Staff] ${relay.answer}`,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    const followUpPrompt = pmExecutorPrompt({
+      divisionName: task.division.name,
+      roleName: agent.agentRole.name,
+      responsibilities: agent.agentRole.responsibilities,
+      taskTitle: task.title,
+      taskDescription: followUpDescription,
     });
-    await apiClient.setAgentStatus(agent.id, "IDLE");
-    return; // task is now AWAITING_DIRECTOR - resumes via QuestionsService.answer once the director replies
+
+    const followUp = await openRouter.chat(route.modelId, [
+      { role: "system", content: agent.systemPrompt ?? "Kerjakan task yang diberikan sebaik mungkin, sebagai PM divisi." },
+      { role: "user", content: followUpPrompt },
+    ]);
+    await apiClient.recordUsage({
+      agentId: agent.id,
+      taskId: task.id,
+      modelUsed: route.modelId,
+      modelVariant: route.variant,
+      source: "kanban",
+      tokensIn: followUp.tokensIn,
+      tokensOut: followUp.tokensOut,
+    });
+
+    try {
+      const unfenced = followUp.content.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+      parsed = JSON.parse(unfenced);
+      if (parsed.type !== "result" && parsed.type !== "question") throw new Error("unexpected type");
+    } catch {
+      parsed = { type: "result", summary: followUp.content };
+    }
+
+    if (parsed.type === "question") {
+      // Still stuck even with Chief of Staff's answer folded in - don't loop
+      // forever relaying back and forth. Chief of Staff has already weighed
+      // in once, so this one goes to the director directly, still under
+      // Chief of Staff's name (the director never sees the division PM here).
+      await apiClient.askDirector({
+        agentId: relay.chiefId,
+        divisionId: relay.pusatId,
+        taskId: task.id,
+        question: parsed.question,
+      });
+      await apiClient.setAgentStatus(agent.id, "IDLE");
+      return;
+    }
   }
 
   const objectKey = await objectStorage.putTaskOutput(task.id, "executor-output.md", parsed.summary, "text/markdown");
@@ -166,6 +232,103 @@ async function runPmExecutor(
   await apiClient.setAgentStatus(agent.id, "IDLE");
 
   await runQaIfReviewerAssigned(task.id, parsed.summary);
+}
+
+function isChiefOfStaff(roleName: string, divisionSlug: string): boolean {
+  return divisionSlug === "pusat" && roleName.toLowerCase().includes("chief of staff");
+}
+
+type RelayResult =
+  | { resolved: true; answer: string; chiefId: string; pusatId: string }
+  | { resolved: false };
+
+/**
+ * "Koordinasi PM hanya sebatas sampai Chief of Staff, direktur hanya
+ * koordinasi dengan 1 orang" - when any division PM (never Chief of Staff
+ * itself, handled separately above) raises a question mid-task, it lands on
+ * Chief of Staff first, not the director. Chief of Staff is itself an AI
+ * agent, so this is resolved synchronously as a single extra model call
+ * right here in the worker - no task pause, no extra round trip - unless
+ * Chief of Staff genuinely decides the director needs to be looped in, in
+ * which case IT (not the original PM) becomes the one asking.
+ */
+async function relayQuestionThroughChiefOfStaff(
+  agent: Awaited<ReturnType<typeof prisma.agent.findUniqueOrThrow>> & {
+    agentRole: { name: string; division: any; divisionId: string };
+  },
+  task: Awaited<ReturnType<typeof prisma.task.findUniqueOrThrow>> & { division: { name: string; slug: string } },
+  question: string,
+): Promise<RelayResult> {
+  const pusat = await prisma.division.findUnique({
+    where: { slug: "pusat" },
+    include: { agentRoles: { include: { agents: true, modelClass: true } } },
+  });
+  const chiefRole = pusat?.agentRoles.find((r: { name: string }) => isChiefOfStaff(r.name, "pusat"));
+  const chief = chiefRole?.agents[0];
+
+  if (!pusat || !chiefRole || !chief) {
+    // No Chief of Staff agent configured yet - fail safe to the old
+    // direct-to-director path rather than leaving the PM stuck forever.
+    console.error(`[task-assigned] Chief of Staff tidak ditemukan - pertanyaan task ${task.id} langsung ke direktur.`);
+    await apiClient.askDirector({
+      agentId: agent.id,
+      divisionId: agent.agentRole.divisionId,
+      taskId: task.id,
+      question,
+    });
+    await apiClient.setAgentStatus(agent.id, "IDLE");
+    return { resolved: false };
+  }
+
+  const route = resolveModel(chiefRole.modelClass, chief.modelVariant);
+  const prompt = chiefOfStaffRelayPrompt({
+    askingRoleName: agent.agentRole.name,
+    askingDivisionName: task.division.name,
+    taskTitle: task.title,
+    taskDescription: task.description,
+    question,
+  });
+
+  const { content, tokensIn, tokensOut } = await openRouter.chat(route.modelId, [
+    {
+      role: "system",
+      content: chief.systemPrompt ?? "Kamu adalah Chief of Staff yang menyaring pertanyaan PM sebelum sampai ke direktur.",
+    },
+    { role: "user", content: prompt },
+  ]);
+  await apiClient.recordUsage({
+    agentId: chief.id,
+    taskId: task.id,
+    modelUsed: route.modelId,
+    modelVariant: route.variant,
+    source: "pm-relay",
+    tokensIn,
+    tokensOut,
+  });
+
+  let relay: { type: "answer"; answer: string } | { type: "escalate"; question: string };
+  try {
+    const unfenced = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+    relay = JSON.parse(unfenced);
+    if (relay.type !== "answer" && relay.type !== "escalate") throw new Error("unexpected type");
+  } catch {
+    // Chief of Staff's model didn't return clean JSON - fail safe to
+    // escalating with the PM's original question rather than guessing an answer.
+    relay = { type: "escalate", question };
+  }
+
+  if (relay.type === "escalate") {
+    await apiClient.askDirector({
+      agentId: chief.id,
+      divisionId: pusat.id,
+      taskId: task.id,
+      question: relay.question,
+    });
+    await apiClient.setAgentStatus(agent.id, "IDLE");
+    return { resolved: false };
+  }
+
+  return { resolved: true, answer: relay.answer, chiefId: chief.id, pusatId: pusat.id };
 }
 
 /** If a REVIEWER was already assigned to this task, run the review now that output exists. */
