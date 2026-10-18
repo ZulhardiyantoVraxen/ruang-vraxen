@@ -153,4 +153,26 @@ export class GoogleSheetsClient {
 
     return { spreadsheetId, url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit` };
   }
+
+  /**
+   * Appends one row to the end of `sheetName` in an EXISTING spreadsheet -
+   * the master PM tracking sheet's use case ("satu Google Sheets berisi
+   * banyak project, ada timeline, judul task, PIC, keterangan dan status"):
+   * one row per completed task, growing forever, as opposed to
+   * createSpreadsheet's one-new-file-per-call pattern. `values:append` finds
+   * the first empty row itself (INSERT_ROWS), so no read-then-write race
+   * between two tasks finishing at the same moment.
+   */
+  async appendRow(spreadsheetId: string, row: (string | number)[], sheetName = "Sheet1"): Promise<void> {
+    const token = await this.getAccessToken();
+    const res = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(sheetName)}!A1:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ values: [row] }),
+      },
+    );
+    if (!res.ok) throw new Error(`Google Sheets tambah baris gagal (${res.status}): ${await res.text()}`);
+  }
 }

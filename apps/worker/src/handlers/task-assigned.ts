@@ -446,6 +446,89 @@ async function runPmExecutor(
   await apiClient.setAgentStatus(agent.id, "IDLE");
 
   await runQaIfReviewerAssigned(task.id, parsed.summary);
+  await appendPmReportRowIfConfigured(agent, task, parsed.summary);
+}
+
+/**
+ * "Satu Google Sheets berisi banyak project, ada timeline, judul task, PIC,
+ * keterangan dan status" - every division PM (not Chief of Staff - its own
+ * triage/consolidation tasks aren't tied to a client Project, so there's
+ * nothing meaningful to log here) gets one new row in a single shared
+ * tracking sheet each time it finishes a Project task, rather than Finance's
+ * one-new-file-per-task pattern. Best-effort, same fail-open philosophy as
+ * createBudgetSheetIfConfigured: with no GOOGLE_* env vars configured, or no
+ * Project attached to this task, this silently skips.
+ */
+async function appendPmReportRowIfConfigured(
+  agent: { id: string; displayName: string; agentRole: { name: string; division: { name: string } } },
+  task: { id: string; title: string; projectId: string | null },
+  summary: string,
+) {
+  const { serviceAccountEmail, privateKey, projectsRootFolderId } = config.google;
+  if (!serviceAccountEmail || !privateKey || !projectsRootFolderId) return;
+  if (!task.projectId) return; // not tied to a client Project - nothing to log
+
+  try {
+    const sheets = new GoogleSheetsClient({ clientEmail: serviceAccountEmail, privateKey });
+    const spreadsheetId = await getOrCreateMasterTrackingSheet(sheets, projectsRootFolderId);
+
+    // Read the task back after runQaIfReviewerAssigned so "Status" reflects
+    // where it actually landed (DONE if auto-passed with no reviewer, REVIEW/
+    // BLOCKED/APPROVAL_PENDING otherwise) rather than guessing.
+    const finalTask = await prisma.task.findUnique({ where: { id: task.id } });
+    const statusLabel = taskStatusLabel(finalTask?.status ?? "DONE");
+    const timeline = new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta", dateStyle: "medium", timeStyle: "short" });
+    const keterangan = summary.length > 300 ? `${summary.slice(0, 300)}…` : summary;
+
+    await sheets.appendRow(spreadsheetId, [
+      timeline,
+      task.title,
+      `${agent.displayName} (${agent.agentRole.name} - ${agent.agentRole.division.name})`,
+      keterangan,
+      statusLabel,
+    ]);
+  } catch (err) {
+    console.error(`[task-assigned] gagal menambah baris tracking PM untuk task ${task.id}:`, err);
+  }
+}
+
+/** Finds (or creates, first time only) the single shared PM tracking sheet, directly inside the Drive bersama root - cached the same marker-file way as the per-project folder/budget sheet. */
+async function getOrCreateMasterTrackingSheet(sheets: GoogleSheetsClient, rootFolderId: string): Promise<string> {
+  const key = "pm-tracking-sheet.json";
+  if (await objectStorage.exists(key)) {
+    const buffer = await objectStorage.getObjectBuffer(key);
+    const data = JSON.parse(buffer.toString("utf-8")) as { spreadsheetId: string };
+    if (data.spreadsheetId) return data.spreadsheetId;
+  }
+
+  const { spreadsheetId, url } = await sheets.createSpreadsheet(
+    "Tracking Task - Semua Project",
+    [["Timeline", "Judul Task", "PIC", "Keterangan", "Status"]],
+    rootFolderId,
+  );
+  await objectStorage.putObject(key, JSON.stringify({ spreadsheetId, url, createdAt: new Date().toISOString() }), "application/json");
+  return spreadsheetId;
+}
+
+function taskStatusLabel(status: string): string {
+  switch (status) {
+    case "DONE":
+      return "Selesai";
+    case "REVIEW":
+      return "Menunggu QA";
+    case "APPROVAL_PENDING":
+      return "Menunggu Persetujuan Direktur";
+    case "AWAITING_DIRECTOR":
+      return "Menunggu Jawaban Direktur";
+    case "BLOCKED":
+      return "Terhambat";
+    case "REJECTED":
+      return "Ditolak";
+    case "FAILED":
+      return "Gagal";
+    default:
+      return status;
+  }
 }
 
 /**
