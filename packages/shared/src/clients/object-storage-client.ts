@@ -55,4 +55,18 @@ export class ObjectStorageClient {
       return false;
     }
   }
+
+  /**
+   * Reads the whole object into memory. MinIO has no published host port in
+   * production (internal Docker network only, by design - see
+   * docker-compose.prod.yml) and a getSignedDownloadUrl() pointing at
+   * `minio:9000` is unreachable from a browser, so the API proxies/streams
+   * the bytes itself instead of handing out a direct storage URL.
+   */
+  async getObjectBuffer(key: string): Promise<Buffer> {
+    const res = await this.s3.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
+    const chunks: Buffer[] = [];
+    for await (const chunk of res.Body as AsyncIterable<Buffer>) chunks.push(Buffer.from(chunk));
+    return Buffer.concat(chunks);
+  }
 }

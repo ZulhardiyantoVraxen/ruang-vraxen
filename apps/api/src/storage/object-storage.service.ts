@@ -19,7 +19,8 @@ export class ObjectStorageService {
     return this.client.exists(key);
   }
 
-  getSignedDownloadUrl(key: string, expiresInSeconds = 3600) {
-    return this.client.getSignedDownloadUrl(key, expiresInSeconds);
+  /** The API is the only public door onto object storage - it reads the object itself and streams it back. */
+  getObjectBuffer(key: string) {
+    return this.client.getObjectBuffer(key);
   }
 }

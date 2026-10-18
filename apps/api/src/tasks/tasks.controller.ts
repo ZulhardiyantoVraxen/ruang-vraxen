@@ -1,4 +1,5 @@
-import { Body, Controller, Get, NotFoundException, Param, Patch, Post } from "@nestjs/common";
+import { Body, Controller, Get, NotFoundException, Param, Patch, Post, Res } from "@nestjs/common";
+import type { Response } from "express";
 import { TasksService } from "./tasks.service";
 import { BroadcastCommandDto, CreateTaskDto, TriageTaskDto } from "./dto";
 import { ObjectStorageService } from "../storage/object-storage.service";
@@ -61,13 +62,23 @@ export class TasksController {
    * tersimpan di Google Drive" - a real file has to exist before it can be
    * uploaded anywhere). Stored at a predictable key by the worker right
    * after the executor finishes, so no DB column is needed for it.
+   *
+   * MinIO has no published host port in production (internal network only,
+   * by design), so the API reads the object itself and streams it back -
+   * the browser only ever talks to the already-public API, never MinIO.
    */
-  @Get(":id/pdf-url")
-  async pdfUrl(@Param("id") id: string) {
+  @Get(":id/pdf")
+  async pdf(@Param("id") id: string, @Res() res: Response) {
     const key = `${id}/executor-output.pdf`;
     if (!(await this.storage.exists(key))) {
       throw new NotFoundException("PDF belum tersedia untuk task ini.");
     }
-    return { url: await this.storage.getSignedDownloadUrl(key) };
+    const buffer = await this.storage.getObjectBuffer(key);
+    res.set({
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `inline; filename="task-${id}.pdf"`,
+      "Content-Length": buffer.length,
+    });
+    res.send(buffer);
   }
 }
