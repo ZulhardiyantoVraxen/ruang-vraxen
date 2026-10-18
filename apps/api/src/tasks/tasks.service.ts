@@ -224,8 +224,21 @@ export class TasksService {
           priority: 3,
         },
       });
-      await this.assign(task.id, pm.id, "EXECUTOR");
-      dispatched.push({ divisionSlug: division.slug, pmName: pm.displayName, taskId: task.id });
+      try {
+        await this.assign(task.id, pm.id, "EXECUTOR");
+        dispatched.push({ divisionSlug: division.slug, pmName: pm.displayName, taskId: task.id });
+      } catch (err) {
+        // A PM already at their concurrency limit (maxConcurrentTasks) is
+        // one division's problem, not a reason to skip chasing every other
+        // division too - the created-but-unassigned task just sits in
+        // TRIAGE until the PM frees up; tomorrow's check-in finds a
+        // different marker-title task already exists today, so it won't
+        // double up in the meantime.
+        skipped.push({
+          divisionSlug: division.slug,
+          reason: err instanceof Error ? err.message : "Gagal menugaskan PM",
+        });
+      }
     }
 
     return { dispatched, skipped };
