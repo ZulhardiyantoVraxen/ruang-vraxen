@@ -69,8 +69,9 @@ async function main() {
         "liquid/lfm-2.5-2.6b:free",
         "nvidia/nemotron-3.5-lightning:free",
         "poolside/laguna-xs-2.1:free",
-        "thinkingmachines/inkling-small:free",
-        "thinkingmachines/inkling:free",
+        // thinkingmachines/inkling(-small):free removed - OpenRouter rejects
+        // both with 403 "only available on agentic harnesses" when called as
+        // a plain chat completion, which is all this worker ever does.
         "xingchen-agi/xing4.0-29b-a4b:free",
         "nvidia/nemotron-3.5-super-vl:free",
       ],

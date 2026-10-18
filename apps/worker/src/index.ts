@@ -3,6 +3,7 @@ import { config } from "./config";
 import { TOPICS, PlatformEvent } from "@platform/shared";
 import { handleTaskAssigned, TaskAssignedPayload } from "./handlers/task-assigned";
 import { handleTaskCreated, TaskCreatedPayload } from "./handlers/task-created";
+import { apiClient } from "./api-client";
 
 const kafka = new Kafka({ clientId: "platform-worker", brokers: config.kafkaBrokers });
 const consumer = kafka.consumer({ groupId: "platform-worker" });
@@ -41,6 +42,21 @@ async function main() {
         // deployment should push this to a dead-letter topic instead of
         // just logging.
         console.error(`[worker] failed handling ${event.eventType} for ${event.aggregateId}:`, err);
+
+        // Without this, an unhandled error partway through handleTaskAssigned
+        // (e.g. OpenRouter rejecting a free model slug, a model timing out)
+        // leaves the agent stuck WORKING forever - it never becomes eligible
+        // for its next task again, silently freezing that seat. Best-effort:
+        // if even this fails, the agent stays stuck and needs a manual nudge,
+        // but at least the rest of the division keeps running.
+        if (event.eventType === "task.assigned") {
+          const agentId = (event.payload as TaskAssignedPayload | undefined)?.agentId;
+          if (agentId) {
+            await apiClient.setAgentStatus(agentId, "IDLE").catch((resetErr) => {
+              console.error(`[worker] also failed to reset agent ${agentId} to IDLE after the error above:`, resetErr);
+            });
+          }
+        }
       }
     },
   });
