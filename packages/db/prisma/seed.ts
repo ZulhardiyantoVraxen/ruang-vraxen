@@ -60,11 +60,13 @@ async function main() {
       tier: ModelTier.RUTIN,
       label: "Model murah/cepat",
       openRouterModelPaid: "meta-llama/llama-3.3-70b-instruct",
-      openRouterModelFree: "meta-llama/llama-3.3-70b-instruct:free",
+      openRouterModelFree: "google/gemma-4-26b-a4b-it:free",
       // Tingkat volume terbesar - rotasi di antara model gratis yang murah/cepat
       // supaya pemakaian tersebar, bukan numpuk di satu model terus.
       openRouterModelFreePool: [
-        "meta-llama/llama-3.3-70b-instruct:free",
+        // meta-llama/llama-3.3-70b-instruct:free removed - OpenRouter now
+        // returns a hard 404 "unavailable for free" on every call (not
+        // flaky/rate-limited, permanently deprecated as of 2026-10).
         "google/gemma-4-26b-a4b-it:free",
         "liquid/lfm-2.5-2.6b:free",
         "nvidia/nemotron-3.5-lightning:free",
