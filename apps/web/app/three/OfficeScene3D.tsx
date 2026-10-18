@@ -278,6 +278,7 @@ function DivisionZone({
   const desks = layout.desks.filter((d) => d.divisionSlug === slug);
   if (!zone || zone.deskCount === 0) return null;
   const centerZ = (layout.building.minZ + layout.building.minZ + 3.2) / 2 + 1.2;
+  const signZ = -0.55; // the sekat's aisle-facing edge, where the partition posts sit too
   const total = tasks.length;
   const done = tasks.filter((t) => t.status === "DONE").length;
   const percent = total > 0 ? Math.round((done / total) * 100) : null;
@@ -288,24 +289,37 @@ function DivisionZone({
         <planeGeometry args={[zone.maxX - zone.minX, 3.6]} />
         <meshStandardMaterial color={accent} transparent opacity={0.16} roughness={0.9} />
       </mesh>
-      <Html position={[zone.centerX, 2.3, centerZ + 1.6]} center distanceFactor={11} style={{ pointerEvents: "auto" }}>
+      {/* Division nameplate: a physical sign hung above the sekat's front edge, not just a floating tag. */}
+      <group position={[zone.centerX, 0, signZ]}>
+        <RBox position={[0, 1.45, 0]} size={[Math.min(zone.maxX - zone.minX - 0.4, 2.6), 0.42, 0.06]} radius={0.03} color={accent} roughness={0.6} />
+      </group>
+      <Html position={[zone.centerX, 1.45, signZ + 0.05]} center distanceFactor={10} style={{ pointerEvents: "auto" }}>
         <div
           onClick={() => onSelect(slug)}
           style={{
             fontFamily: "var(--font-sans, system-ui), sans-serif",
             textAlign: "center",
             cursor: "pointer",
-            background: "rgba(10,17,25,0.78)",
-            border: `1px solid ${accent}99`,
-            borderRadius: 9,
-            padding: "4px 11px",
             whiteSpace: "nowrap",
           }}
         >
-          <div style={{ fontSize: 12.5, fontWeight: 700, color: "#eef3f7" }}>{name}</div>
-          <div style={{ fontSize: 10, color: percent !== null ? "#5fc9b8" : "rgba(238,243,247,0.6)" }}>
-            {percent !== null ? `${percent}% selesai` : "Belum ada task"}
-          </div>
+          <div style={{ fontSize: 13, fontWeight: 800, color: "#fff", letterSpacing: 0.3, textShadow: "0 1px 2px rgba(0,0,0,0.35)" }}>{name.toUpperCase()}</div>
+        </div>
+      </Html>
+      <Html position={[zone.centerX, 0.95, signZ + 0.05]} center distanceFactor={11} style={{ pointerEvents: "none" }}>
+        <div
+          style={{
+            fontFamily: "var(--font-sans, system-ui), sans-serif",
+            fontSize: 10,
+            fontWeight: 600,
+            color: percent !== null ? "#5fc9b8" : "rgba(238,243,247,0.65)",
+            background: "rgba(10,17,25,0.72)",
+            padding: "2px 8px",
+            borderRadius: 6,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {percent !== null ? `${percent}% selesai` : "Belum ada task"}
         </div>
       </Html>
       {desks.map((slot, i) => (
@@ -445,6 +459,27 @@ function GameRoom({ layout }: { layout: OfficeLayout }) {
   );
 }
 
+/** Low partition walls between adjacent divisions' desk blocks, so each corner is physically sekat. */
+function DivisionPartitions({ layout }: { layout: OfficeLayout }) {
+  const { minZ } = layout.building;
+  const active = layout.zones.filter((z) => z.deskCount > 0);
+  const fromZ = minZ + 0.05;
+  const toZ = -0.55;
+  return (
+    <group>
+      {active.slice(0, -1).map((zone, i) => {
+        const x = zone.minX; // coincides with active[i + 1].maxX
+        return (
+          <group key={zone.slug}>
+            <Wall from={[x, fromZ]} to={[x, toZ]} height={1.3} />
+            <RBox position={[x, 1.32, toZ]} size={[0.3, 0.05, 0.3]} radius={0.01} color="#d9cdb8" />
+          </group>
+        );
+      })}
+    </group>
+  );
+}
+
 function Building({ layout }: { layout: OfficeLayout }) {
   const { minX, maxX, minZ, maxZ } = layout.building;
   const wood = useMemo(() => woodFloor([5, 5]), []);
@@ -463,6 +498,7 @@ function Building({ layout }: { layout: OfficeLayout }) {
       {[-7, -3.6, 1.4, 6.6].map((x) => (
         <RBox key={x} position={[x, 1.55, minZ + 0.1]} size={[1.9, 1.22, 0.1]} radius={0.02} color="#9fd3ea" opacity={0.3} roughness={0.05} shadow={false} />
       ))}
+      <DivisionPartitions layout={layout} />
       <MeetingRoom layout={layout} />
       <Lounge layout={layout} />
       <Pantry layout={layout} />
