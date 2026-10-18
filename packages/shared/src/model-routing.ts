@@ -9,6 +9,8 @@ export type ModelVariant = "FREE" | "PAID";
 export interface ModelClassLike {
   tier: string;
   openRouterModelFree: string | null;
+  /** Several free OpenRouter slugs for this Tingkat - one is picked at random per call so idle free models actually get used. */
+  openRouterModelFreePool?: string[] | null;
   openRouterModelPaid: string;
   requiresZeroRetention: boolean;
 }
@@ -26,8 +28,15 @@ export function resolveModel(modelClass: ModelClassLike, requestedVariant: Model
   if (modelClass.requiresZeroRetention && requestedVariant === "FREE") {
     return { modelId: modelClass.openRouterModelPaid, variant: "PAID", requiresZeroRetention: true };
   }
-  if (requestedVariant === "FREE" && modelClass.openRouterModelFree) {
-    return { modelId: modelClass.openRouterModelFree, variant: "FREE", requiresZeroRetention: false };
+  if (requestedVariant === "FREE") {
+    const pool = (modelClass.openRouterModelFreePool ?? []).filter(Boolean);
+    if (pool.length > 0) {
+      const pick = pool[Math.floor(Math.random() * pool.length)];
+      return { modelId: pick, variant: "FREE", requiresZeroRetention: false };
+    }
+    if (modelClass.openRouterModelFree) {
+      return { modelId: modelClass.openRouterModelFree, variant: "FREE", requiresZeroRetention: false };
+    }
   }
   return {
     modelId: modelClass.openRouterModelPaid,

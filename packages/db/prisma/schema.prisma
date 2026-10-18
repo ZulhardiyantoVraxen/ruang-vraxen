@@ -40,8 +40,12 @@ model ModelClass {
   id                     String       @id @default(cuid())
   tier                   ModelTier    @unique
   label                  String       // e.g. "Premium (Claude Sonnet/Opus atau setara)"
-  openRouterModelFree    String?      // e.g. "meta-llama/llama-3.3-70b-instruct:free"
+  openRouterModelFree    String?      // DEPRECATED - single legacy free slug, kept as fallback when the pool below is empty
   openRouterModelPaid    String       // e.g. "anthropic/claude-sonnet-4.5"
+  // "Maksimalkan versi gratis yang belum terpakai" - a Tingkat can now spread
+  // its FREE-variant calls across several OpenRouter free models instead of
+  // always hitting the same one. resolveModel() picks one at random per call.
+  openRouterModelFreePool String[]    @default([])
   requiresZeroRetention  Boolean      @default(false)
   notes                  String?
   createdAt              DateTime     @default(now())

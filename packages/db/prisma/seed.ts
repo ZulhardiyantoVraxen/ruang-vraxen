@@ -35,6 +35,18 @@ async function main() {
       label: "Menengah-premium, terutama untuk kode dan angka",
       openRouterModelPaid: "anthropic/claude-sonnet-4.5",
       openRouterModelFree: "qwen/qwen-2.5-coder-32b-instruct:free",
+      // "Maksimalkan versi gratis" - rotasi acak di antara semua model gratis
+      // di akun OpenRouter yang cukup mampu untuk kode/angka, bukan cuma satu.
+      openRouterModelFreePool: [
+        "qwen/qwen-2.5-coder-32b-instruct:free",
+        "cohere/north-mini-code:free",
+        "nvidia/nemotron-3-ultra-550b-a55b:free",
+        "nvidia/nemotron-3-super-120b-a12b:free",
+        "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+        "google/gemma-4-31b-it:free",
+        "dots-studio/dots-3-note-preview:free",
+        "poolside/laguna-s-2.1:free",
+      ],
       requiresZeroRetention: false,
       notes:
         "Developer, QA/Reviewer, Estimator, Tender & Dokumen, Billing & Klaim, Kepatuhan Data, dll.",
@@ -49,6 +61,19 @@ async function main() {
       label: "Model murah/cepat",
       openRouterModelPaid: "meta-llama/llama-3.3-70b-instruct",
       openRouterModelFree: "meta-llama/llama-3.3-70b-instruct:free",
+      // Tingkat volume terbesar - rotasi di antara model gratis yang murah/cepat
+      // supaya pemakaian tersebar, bukan numpuk di satu model terus.
+      openRouterModelFreePool: [
+        "meta-llama/llama-3.3-70b-instruct:free",
+        "google/gemma-4-26b-a4b-it:free",
+        "liquid/lfm-2.5-2.6b:free",
+        "nvidia/nemotron-3.5-lightning:free",
+        "poolside/laguna-xs-2.1:free",
+        "thinkingmachines/inkling-small:free",
+        "thinkingmachines/inkling:free",
+        "xingchen-agi/xing4.0-29b-a4b:free",
+        "nvidia/nemotron-3.5-super-vl:free",
+      ],
       requiresZeroRetention: false,
       notes:
         "Riset, Publisher, Front Office, Inventori, Pelaporan Lapangan, Finance (rekap). Porsi token terbesar - di sini penghematan terbesar.",
