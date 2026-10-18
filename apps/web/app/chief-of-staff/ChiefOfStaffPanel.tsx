@@ -145,7 +145,7 @@ export default function ChiefOfStaffPanel({ pusat }: { pusat: Division | null })
         )}
       </div>
 
-      {!pusat && <p className={styles.error}>Tidak bisa memuat divisi Direktur / Chief of Staff. Coba muat ulang halaman.</p>}
+      {!pusat && <p className={styles.error}>Tidak bisa memuat divisi Sekretariat Direksi / Chief of Staff. Coba muat ulang halaman.</p>}
 
       {pusat && (
         <div className={styles.card}>
