@@ -111,8 +111,7 @@ services:
   web:
     image: ruang-web:latest
     restart: unless-stopped
-    environment:
-      API_URL: http://api:4000
+    env_file: .env.prod # API_URL (host apps/api) kini dibaca dari sini, sama seperti api/worker
     depends_on: [api]
     mem_limit: 384m
     networks: [internal]

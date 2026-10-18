@@ -126,17 +126,25 @@ sama tetap berurutan.
 
 ```bash
 cp infra/.env.example apps/api/.env
+cp infra/.env.example apps/worker/.env
+cp infra/.env.example apps/web/.env
 pnpm install
 pnpm infra:up                 # Postgres, Redis, Kafka, MinIO
 pnpm db:migrate                # bikin tabel dari schema.prisma
 pnpm --filter @platform/db prisma:seed   # isi 3 ModelClass (ATAS/AHLI/RUTIN)
 pnpm dev:api                   # Nest.js di :4000
+pnpm dev:worker                # consumer Kafka - perlu OPENROUTER_API_KEY untuk triage/eksekusi
 pnpm dev:web                   # Next.js di :3000
 ```
 
-Isi `OPENROUTER_API_KEY` di `apps/api/.env` (dari https://openrouter.ai/keys) sebelum
-mencoba alur onboarding — itu satu-satunya kredensial yang dibutuhkan untuk memanggil model,
-baik versi gratis maupun berbayar.
+Isi `OPENROUTER_API_KEY` di `apps/api/.env` dan `apps/worker/.env` (dari https://openrouter.ai/keys)
+sebelum mencoba alur onboarding atau triage — itu satu-satunya kredensial yang dibutuhkan untuk
+memanggil model, baik versi gratis maupun berbayar.
+
+Ketiga app baca env dari file `.env` miliknya sendiri di folder masing-masing (bukan satu `.env`
+di root): `apps/api` lewat `@nestjs/config`, `apps/worker` lewat `dotenv`, `apps/web` otomatis
+oleh Next.js. `API_URL` di file itu adalah host dari `apps/api` - dipakai `apps/worker` untuk
+memanggil API, dan `apps/web` untuk fetch sisi server (lihat komentar di `infra/.env.example`).
 
 ## VPS: apa yang diperlukan untuk menjalankan mesin agentic AI-nya
 

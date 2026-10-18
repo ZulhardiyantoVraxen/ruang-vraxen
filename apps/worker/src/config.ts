@@ -1,3 +1,11 @@
+// Unlike apps/api (which gets this for free from @nestjs/config) and
+// apps/web (which Next.js loads automatically), nothing in apps/worker read
+// a local .env file before this - locally it silently ran on the
+// http://localhost:* fallbacks below with no OPENROUTER_API_KEY, which is
+// why only exporting shell env vars by hand ever worked. `cp
+// infra/.env.example apps/worker/.env` now actually takes effect.
+import "dotenv/config";
+
 function required(name: string): string {
   const v = process.env[name];
   if (!v) throw new Error(`Missing required env var ${name}`);
