@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, Patch, Post } from "@nestjs/common";
 import { TasksService } from "./tasks.service";
-import { CreateTaskDto, TriageTaskDto } from "./dto";
+import { BroadcastCommandDto, CreateTaskDto, TriageTaskDto } from "./dto";
 
 @Controller("tasks")
 export class TasksController {
@@ -8,6 +8,11 @@ export class TasksController {
 
   @Post() create(@Body() dto: CreateTaskDto) {
     return this.service.create(dto);
+  }
+
+  /** "Perintah sekaligus" from the office view - one instruction, several agents at once. */
+  @Post("broadcast") broadcast(@Body() dto: BroadcastCommandDto) {
+    return this.service.broadcast(dto);
   }
 
   @Get("division/:divisionId/running") running(@Param("divisionId") divisionId: string) {

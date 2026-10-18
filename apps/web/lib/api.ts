@@ -41,6 +41,12 @@ export const api = {
     priority?: number;
     requiresApproval?: boolean;
   }) => request<any>("/tasks", { method: "POST", body: JSON.stringify(payload) }),
+  /** "Perintah sekaligus" - one instruction, fanned out to any number of agents at once. */
+  broadcastCommand: (agentIds: string[], instruction: string) =>
+    request<{ dispatched: { agentId: string; agentName: string; taskId: string }[]; failed: { agentId: string; agentName: string; reason: string }[] }>(
+      "/tasks/broadcast",
+      { method: "POST", body: JSON.stringify({ agentIds, instruction }) }
+    ),
   startOnboarding: (brief: string) => request<any>("/onboarding/start", { method: "POST", body: JSON.stringify({ brief }) }),
   answerOnboarding: (sessionId: string, answer: string) =>
     request<any>(`/onboarding/${sessionId}/answer`, { method: "POST", body: JSON.stringify({ answer }) }),

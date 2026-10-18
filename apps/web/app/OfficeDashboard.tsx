@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState, type PointerEvent, type WheelEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent, type WheelEvent } from "react";
 import dynamic from "next/dynamic";
 import styles from "./office.module.css";
+import { api } from "@/lib/api";
 
 // The 3D scene pulls in three.js + @react-three/fiber, which is a sizeable
 // chunk of JS and needs a WebGL canvas - loaded only when the person
@@ -190,8 +191,9 @@ const FLOW_STEPS = [
   { title: "Naik ke Chief of Staff bila perlu approval", body: "Keputusan berisiko (deploy produksi, arsitektur, biaya) digabungkan Chief of Staff jadi satu antrean persetujuan Anda." },
 ];
 
-export default function OfficeDashboard({ divisions, approvals }: { divisions: Division[]; approvals: Approval[] }) {
-  const [tab, setTab] = useState<"crew" | "stats" | "flow">("crew");
+export default function OfficeDashboard({ divisions: initialDivisions, approvals }: { divisions: Division[]; approvals: Approval[] }) {
+  const [divisions, setDivisions] = useState(initialDivisions);
+  const [tab, setTab] = useState<"crew" | "stats" | "flow" | "command">("crew");
   const [view, setView] = useState<"2d" | "3d">("3d");
   const [selected, setSelected] = useState<FlatAgent | null>(null);
   const [selectedDivisionSlug, setSelectedDivisionSlug] = useState<string | null>(null);
@@ -199,6 +201,33 @@ export default function OfficeDashboard({ divisions, approvals }: { divisions: D
   const [rotation, setRotation] = useState(0);
   const [zoom, setZoom] = useState(0.72);
   const [dragStart, setDragStart] = useState<{ x: number; rotation: number } | null>(null);
+
+  // So that an agent given a command (or finishing one) visibly changes state -
+  // walks to their desk, sits, types - without the person reloading the page.
+  useEffect(() => {
+    const id = setInterval(() => {
+      api.listDivisions().then(setDivisions).catch(() => {});
+    }, 4000);
+    return () => clearInterval(id);
+  }, []);
+
+  // "Perintah sekaligus": pick any number of agents (1, 2, or everyone), one
+  // free-text instruction, dispatched together - each picked agent gets its
+  // own Task and heads straight for its own desk to work on it.
+  const [commandSelected, setCommandSelected] = useState<Set<string>>(new Set());
+  const [commandText, setCommandText] = useState("");
+  const [commandSending, setCommandSending] = useState(false);
+  const [commandResult, setCommandResult] = useState<{ dispatched: { agentId: string; agentName: string }[]; failed: { agentId: string; agentName: string; reason: string }[] } | null>(null);
+  const commandResultTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function toggleCommandAgent(id: string) {
+    setCommandSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   const allAgents: FlatAgent[] = useMemo(
     () =>
@@ -209,6 +238,27 @@ export default function OfficeDashboard({ divisions, approvals }: { divisions: D
       ),
     [divisions]
   );
+
+  async function sendCommand() {
+    const agentIds = Array.from(commandSelected);
+    if (agentIds.length === 0 || !commandText.trim() || commandSending) return;
+    setCommandSending(true);
+    if (commandResultTimer.current) clearTimeout(commandResultTimer.current);
+    try {
+      const result = await api.broadcastCommand(agentIds, commandText.trim());
+      setCommandResult(result);
+      setCommandText("");
+      setCommandSelected(new Set());
+      // Poll right away so the office visibly reacts instead of waiting for
+      // the next 4s tick.
+      api.listDivisions().then(setDivisions).catch(() => {});
+      commandResultTimer.current = setTimeout(() => setCommandResult(null), 15000);
+    } catch {
+      setCommandResult({ dispatched: [], failed: agentIds.map((id) => ({ agentId: id, agentName: id, reason: "Gagal mengirim perintah" })) });
+    } finally {
+      setCommandSending(false);
+    }
+  }
 
   const counts = useMemo(() => {
     const by = (status: string) => allAgents.filter((a) => a.status === status).length;
@@ -296,7 +346,7 @@ export default function OfficeDashboard({ divisions, approvals }: { divisions: D
       <div className={styles.layoutRow}>
         {view === "3d" ? (
           <div className={styles.stage3d}>
-            <OfficeScene3D divisions={divisions} onSelectDivision={setSelectedDivisionSlug} />
+            <OfficeScene3D divisions={divisions} onSelectDivision={setSelectedDivisionSlug} selectedAgentIds={commandSelected} />
           </div>
         ) : (
         <div
@@ -375,9 +425,88 @@ export default function OfficeDashboard({ divisions, approvals }: { divisions: D
             <button className={`${styles.tabButton} ${tab === "flow" ? styles.tabButtonActive : ""}`} onClick={() => setTab("flow")}>
               Alur Kerja
             </button>
+            <button className={`${styles.tabButton} ${tab === "command" ? styles.tabButtonActive : ""}`} onClick={() => setTab("command")}>
+              Perintah
+            </button>
           </div>
 
-          <div className={styles.tabBody}>
+          <div className={styles.tabBody} key={tab}>
+            {tab === "command" && (
+              <div>
+                <p className={styles.commandIntro}>
+                  Pilih siapa saja - satu, dua, atau semua - lalu ketik satu perintah. Setiap yang dipilih langsung dapat task sendiri dan
+                  duduk di mejanya masing-masing untuk mengerjakannya.
+                </p>
+                <div className={styles.commandToolbar}>
+                  <button type="button" className={styles.commandToolbarAction} onClick={() => setCommandSelected(new Set(allAgents.map((a) => a.id)))}>
+                    Pilih semua
+                  </button>
+                  <button type="button" className={styles.commandToolbarAction} onClick={() => setCommandSelected(new Set())}>
+                    Bersihkan
+                  </button>
+                  <span className={styles.commandCount}>{commandSelected.size} dipilih</span>
+                </div>
+                <div className={styles.agentPickList}>
+                  {crewByDivision.map((g) => (
+                    <div key={g.name} className={styles.agentPickGroup}>
+                      {g.agents.length > 0 && <p className={styles.agentPickGroupTitle}>{g.name}</p>}
+                      {g.agents.map((a) => {
+                        const isSelected = commandSelected.has(a.id);
+                        return (
+                          <div
+                            key={a.id}
+                            className={`${styles.agentPickRow} ${isSelected ? styles.agentPickRowSelected : ""}`}
+                            onClick={() => toggleCommandAgent(a.id)}
+                          >
+                            <span className={styles.agentPickCheckbox}>
+                              <svg viewBox="0 0 16 16" fill="none">
+                                <path d="M3 8.5L6 11.5L13 4.5" stroke="#06201a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                            </span>
+                            <span className={styles.agentPickName}>{a.displayName}</span>
+                            <span className={styles.agentPickMeta}>{a.role}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+                <textarea
+                  className={styles.commandTextarea}
+                  placeholder="Contoh: Buat ringkasan progres minggu ini dan kirim ke saya..."
+                  value={commandText}
+                  onChange={(e) => setCommandText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) sendCommand();
+                  }}
+                />
+                <div className={styles.commandSendRow}>
+                  <button
+                    type="button"
+                    className={`${styles.commandSendButton} ${commandSending ? styles.commandSendButtonSending : ""}`}
+                    disabled={commandSelected.size === 0 || !commandText.trim() || commandSending}
+                    onClick={sendCommand}
+                  >
+                    {commandSending ? "Mengirim…" : `Kirim ke ${commandSelected.size || ""} agent`}
+                  </button>
+                </div>
+                {commandResult && (
+                  <div className={styles.commandFeedback}>
+                    {commandResult.dispatched.map((d) => (
+                      <div key={d.agentId} className={`${styles.commandFeedbackLine} ${styles.commandFeedbackOk}`}>
+                        ✓ <span>{d.agentName} mulai mengerjakan</span>
+                      </div>
+                    ))}
+                    {commandResult.failed.map((f) => (
+                      <div key={f.agentId} className={`${styles.commandFeedbackLine} ${styles.commandFeedbackFail}`}>
+                        ✕ <span>{f.agentName}: {f.reason}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {tab === "crew" &&
               crewByDivision.map((g) => (
                 <div key={g.name} className={styles.crewGroup}>

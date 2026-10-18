@@ -155,7 +155,26 @@ type AgentPlan = {
   pmSeat: Seat | null;
 };
 
-function AgentActor({ plan }: { plan: AgentPlan }) {
+/** A pulsing ring under an agent picked in the "Perintah" tab - visible from any camera angle. */
+function SelectionRing() {
+  const ring = useRef<THREE.Mesh>(null);
+  useFrame(({ clock }) => {
+    if (!ring.current) return;
+    const t = clock.elapsedTime;
+    const s = 1 + Math.sin(t * 3) * 0.12;
+    ring.current.scale.set(s, 1, s);
+    const material = ring.current.material as THREE.MeshBasicMaterial;
+    material.opacity = 0.55 + Math.sin(t * 3) * 0.2;
+  });
+  return (
+    <mesh ref={ring} position={[0, 0.03, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+      <ringGeometry args={[0.42, 0.56, 28]} />
+      <meshBasicMaterial color="#5fc9b8" transparent opacity={0.6} depthWrite={false} />
+    </mesh>
+  );
+}
+
+function AgentActor({ plan, selected }: { plan: AgentPlan; selected?: boolean }) {
   const group = useRef<THREE.Group>(null);
   const current = useRef(new THREE.Vector3().copy(plan.homeSeat.pos));
   const facingRef = useRef(plan.homeSeat.facing);
@@ -212,6 +231,7 @@ function AgentActor({ plan }: { plan: AgentPlan }) {
 
   return (
     <group ref={group} position={plan.homeSeat.pos}>
+      {selected && <SelectionRing />}
       <Character name={plan.agent.id} pose={effectivePose} active={active && !walkingNow} />
       <Html position={[0, 1.55, 0]} center distanceFactor={9} style={{ pointerEvents: "none" }}>
         <div
@@ -513,9 +533,12 @@ function Building({ layout }: { layout: OfficeLayout }) {
 export default function OfficeScene3D({
   divisions,
   onSelectDivision,
+  selectedAgentIds,
 }: {
   divisions: Division[];
   onSelectDivision?: (slug: string) => void;
+  /** Agents picked in the "Perintah" tab - rendered with a pulsing ring so a command's targets read at a glance. */
+  selectedAgentIds?: Set<string>;
 }) {
   const handleSelect = (slug: string) => onSelectDivision?.(slug);
 
@@ -626,7 +649,7 @@ export default function OfficeScene3D({
       ))}
 
       {plans.map((plan) => (
-        <AgentActor key={plan.agent.id} plan={plan} />
+        <AgentActor key={plan.agent.id} plan={plan} selected={selectedAgentIds?.has(plan.agent.id)} />
       ))}
 
       <OrbitControls

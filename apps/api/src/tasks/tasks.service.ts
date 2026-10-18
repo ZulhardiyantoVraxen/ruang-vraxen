@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from "@nestjs/comm
 import { PrismaService } from "../prisma/prisma.service";
 import { KafkaService } from "../kafka/kafka.service";
 import { TOPICS } from "@platform/shared";
-import { CreateTaskDto, TriageTaskDto } from "./dto";
+import { BroadcastCommandDto, CreateTaskDto, TriageTaskDto } from "./dto";
 
 /**
  * One division running several jobs at once = several Task rows with the
@@ -102,6 +102,46 @@ export class TasksService {
       payload: { agentId, role },
     });
     return assignment;
+  }
+
+  /**
+   * One instruction, one Task per selected agent, assigned immediately - the
+   * office view's "perintah sekaligus" command. Each agent is already chosen
+   * by the person (not Chief of Staff's pusat-inbox triage), so this never
+   * publishes "task.created" - only "task.assigned", which is what the
+   * worker actually executes (apps/worker's handleTaskAssigned: sets the
+   * agent WORKING, calls its tier's model with the instruction, records the
+   * result, sets it back to IDLE). An agent already at its concurrency
+   * limit is reported as a failure for that agent only - the rest still go out.
+   */
+  async broadcast(dto: BroadcastCommandDto) {
+    const agents = await this.prisma.agent.findMany({
+      where: { id: { in: dto.agentIds } },
+      include: { agentRole: true },
+    });
+    if (agents.length === 0) throw new BadRequestException("Tidak ada agent yang valid dipilih");
+
+    const title = dto.instruction.length > 90 ? `${dto.instruction.slice(0, 90)}…` : dto.instruction;
+    const dispatched: { agentId: string; agentName: string; taskId: string }[] = [];
+    const failed: { agentId: string; agentName: string; reason: string }[] = [];
+
+    for (const agent of agents) {
+      try {
+        const task = await this.prisma.task.create({
+          data: {
+            divisionId: agent.agentRole.divisionId,
+            title,
+            description: dto.instruction,
+            priority: 2,
+          },
+        });
+        await this.assign(task.id, agent.id, "EXECUTOR");
+        dispatched.push({ agentId: agent.id, agentName: agent.displayName, taskId: task.id });
+      } catch (err) {
+        failed.push({ agentId: agent.id, agentName: agent.displayName, reason: err instanceof Error ? err.message : "unknown error" });
+      }
+    }
+    return { dispatched, failed };
   }
 
   /** QA failed -> bounce back to the executor, bounded by Task.maxRevisions (Catatan Penting). */
