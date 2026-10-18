@@ -240,13 +240,25 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
   );
 
   async function sendCommand() {
+    const instruction = commandText.trim();
+    if (!instruction || commandSending) return;
     const agentIds = Array.from(commandSelected);
-    if (agentIds.length === 0 || !commandText.trim() || commandSending) return;
     setCommandSending(true);
     if (commandResultTimer.current) clearTimeout(commandResultTimer.current);
     try {
-      const result = await api.broadcastCommand(agentIds, commandText.trim());
-      setCommandResult(result);
+      if (agentIds.length > 0) {
+        // Picked someone: dispatch straight to them, bypassing triage entirely.
+        const result = await api.broadcastCommand(agentIds, instruction);
+        setCommandResult(result);
+      } else {
+        // Nobody picked: it's a free-standing order, not aimed at anyone in
+        // particular - file it with Chief of Staff like any other request
+        // to "pusat", and let the existing auto-triage (task.created ->
+        // Chief of Staff's AI call) decide who actually ends up at their
+        // desk working on it.
+        await api.createTask({ divisionSlug: "pusat", title: instruction, description: instruction });
+        setCommandResult({ dispatched: [{ agentId: "pusat", agentName: "Chief of Staff (ditriase otomatis)" }], failed: [] });
+      }
       setCommandText("");
       setCommandSelected(new Set());
       // Poll right away so the office visibly reacts instead of waiting for
@@ -254,7 +266,8 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
       api.listDivisions().then(setDivisions).catch(() => {});
       commandResultTimer.current = setTimeout(() => setCommandResult(null), 15000);
     } catch {
-      setCommandResult({ dispatched: [], failed: agentIds.map((id) => ({ agentId: id, agentName: id, reason: "Gagal mengirim perintah" })) });
+      const failedTargets = agentIds.length > 0 ? agentIds : ["pusat"];
+      setCommandResult({ dispatched: [], failed: failedTargets.map((id) => ({ agentId: id, agentName: id, reason: "Gagal mengirim perintah" })) });
     } finally {
       setCommandSending(false);
     }
@@ -434,8 +447,9 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
             {tab === "command" && (
               <div>
                 <p className={styles.commandIntro}>
-                  Pilih siapa saja - satu, dua, atau semua - lalu ketik satu perintah. Setiap yang dipilih langsung dapat task sendiri dan
-                  duduk di mejanya masing-masing untuk mengerjakannya.
+                  Ketik satu perintah apa saja. Pilih siapa saja - satu, dua, atau semua - kalau sudah tahu siapa yang harus mengerjakannya; setiap
+                  yang dipilih langsung dapat task sendiri dan duduk di mejanya masing-masing. Kalau tidak pilih siapa-siapa, perintah tetap
+                  terkirim - Chief of Staff akan membacanya dan menugaskan ke divisi/agent yang paling cocok.
                 </p>
                 <div className={styles.commandToolbar}>
                   <button type="button" className={styles.commandToolbarAction} onClick={() => setCommandSelected(new Set(allAgents.map((a) => a.id)))}>
@@ -484,17 +498,26 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
                   <button
                     type="button"
                     className={`${styles.commandSendButton} ${commandSending ? styles.commandSendButtonSending : ""}`}
-                    disabled={commandSelected.size === 0 || !commandText.trim() || commandSending}
+                    disabled={!commandText.trim() || commandSending}
                     onClick={sendCommand}
                   >
-                    {commandSending ? "Mengirim…" : `Kirim ke ${commandSelected.size || ""} agent`}
+                    {commandSending
+                      ? "Mengirim…"
+                      : commandSelected.size > 0
+                        ? `Kirim ke ${commandSelected.size} agent`
+                        : "Kirim ke Chief of Staff"}
                   </button>
                 </div>
                 {commandResult && (
                   <div className={styles.commandFeedback}>
                     {commandResult.dispatched.map((d) => (
                       <div key={d.agentId} className={`${styles.commandFeedbackLine} ${styles.commandFeedbackOk}`}>
-                        ✓ <span>{d.agentName} mulai mengerjakan</span>
+                        ✓{" "}
+                        <span>
+                          {d.agentId === "pusat"
+                            ? `Terkirim ke ${d.agentName} - sedang menentukan siapa yang paling cocok`
+                            : `${d.agentName} mulai mengerjakan`}
+                        </span>
                       </div>
                     ))}
                     {commandResult.failed.map((f) => (
