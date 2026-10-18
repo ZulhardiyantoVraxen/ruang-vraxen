@@ -61,15 +61,25 @@ export class GoogleSheetsClient {
     return body.access_token;
   }
 
-  /** Returns the id of an existing child folder of `parentFolderId` named exactly `name`, or null if none exists yet. */
+  /**
+   * Returns the id of an existing child folder of `parentFolderId` named
+   * exactly `name`, or null if none exists yet.
+   *
+   * `includeItemsFromAllDrives`+`supportsAllDrives` are required the moment
+   * `parentFolderId` lives inside a Drive bersama (Shared Drive) rather than
+   * someone's My Drive - without them the Drive API silently excludes Shared
+   * Drive content from search results instead of erroring, which would make
+   * every project look "new" and spawn duplicate subfolders.
+   */
   async findFolderByName(name: string, parentFolderId: string): Promise<string | null> {
     const token = await this.getAccessToken();
     const q = encodeURIComponent(
       `name='${name.replace(/'/g, "\\'")}' and '${parentFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
     );
-    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const res = await fetch(
+      `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)&includeItemsFromAllDrives=true&supportsAllDrives=true`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
     if (!res.ok) throw new Error(`Google Drive cari folder gagal (${res.status}): ${await res.text()}`);
     const body = (await res.json()) as { files?: { id: string }[] };
     return body.files?.[0]?.id ?? null;
@@ -78,7 +88,7 @@ export class GoogleSheetsClient {
   /** Creates a new subfolder named `name` directly inside `parentFolderId` (e.g. "Semua Project" -> one folder per project) and returns its id. */
   async createFolder(name: string, parentFolderId: string): Promise<string> {
     const token = await this.getAccessToken();
-    const res = await fetch("https://www.googleapis.com/drive/v3/files?fields=id", {
+    const res = await fetch("https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true", {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ name, mimeType: "application/vnd.google-apps.folder", parents: [parentFolderId] }),
@@ -99,8 +109,16 @@ export class GoogleSheetsClient {
    * own My Drive first (as spreadsheets.create always does, with no way to
    * set a parent at creation) is rejected outright with a bare 403
    * "The caller does not have permission" before it can even be moved.
-   * Creating straight into a folder a real Workspace user owns spends THAT
-   * folder's quota instead, which the service account has Editor access to.
+   *
+   * `parentFolderId` MUST be inside a Drive bersama (Shared Drive), not a
+   * regular My Drive folder. A file a service account creates inside someone
+   * else's ordinary folder is still quota-charged to the CREATOR, not the
+   * folder owner - so it fails with 403 storageQuotaExceeded even when the
+   * folder owner's own Drive has plenty of room, because the service account
+   * itself has 0 bytes of quota. Inside a Shared Drive, new files are charged
+   * to the Shared Drive's own (org-pooled) storage instead, which has no
+   * single "creator" to run out of room - this is why `supportsAllDrives`
+   * is required on both calls below.
    */
   async createSpreadsheet(
     title: string,
@@ -110,7 +128,7 @@ export class GoogleSheetsClient {
     const token = await this.getAccessToken();
     const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 
-    const createRes = await fetch("https://www.googleapis.com/drive/v3/files?fields=id", {
+    const createRes = await fetch("https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true", {
       method: "POST",
       headers,
       body: JSON.stringify({
@@ -124,7 +142,9 @@ export class GoogleSheetsClient {
     const spreadsheetId = created.id;
 
     // A spreadsheet created via the Drive API (rather than Sheets API) gets
-    // Google's default first-tab name, "Sheet1".
+    // Google's default first-tab name, "Sheet1". The Sheets API's
+    // values.update endpoint has no Shared Drive flag of its own to set -
+    // it works against any spreadsheet the caller can already edit.
     const valuesRes = await fetch(
       `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Sheet1!A1?valueInputOption=USER_ENTERED`,
       { method: "PUT", headers, body: JSON.stringify({ values: rows }) },
