@@ -4,3 +4,5 @@ export * from "./clients/openrouter-client";
 export * from "./clients/object-storage-client";
 export * from "./model-routing";
 export * from "./pdf/markdown-to-pdf";
+export * from "./clients/github-client";
+export * from "./github/extract-code-blocks";

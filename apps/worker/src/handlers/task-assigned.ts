@@ -1,11 +1,22 @@
 import { prisma } from "../prisma";
 import { apiClient } from "../api-client";
 import { config } from "../config";
-import { OpenRouterClient, ObjectStorageClient, resolveModel, markdownToPdfBuffer } from "@platform/shared";
+import {
+  OpenRouterClient,
+  ObjectStorageClient,
+  resolveModel,
+  markdownToPdfBuffer,
+  GitHubClient,
+  extractCodeBlocks,
+} from "@platform/shared";
 import { executorPrompt, pmExecutorPrompt, reviewerPrompt } from "../prompts";
 
 const openRouter = new OpenRouterClient(config.openRouterApiKey);
 const objectStorage = new ObjectStorageClient(config.objectStorage);
+const github =
+  config.github.token && config.github.owner && config.github.repo
+    ? new GitHubClient({ owner: config.github.owner, repo: config.github.repo, token: config.github.token })
+    : null;
 
 interface TaskAssignedPayload {
   agentId: string;
@@ -48,7 +59,7 @@ async function runStandardExecutor(
   agent: Awaited<ReturnType<typeof prisma.agent.findUniqueOrThrow>> & {
     agentRole: { name: string; responsibilities: string | null; modelClass: any; division: any };
   },
-  task: Awaited<ReturnType<typeof prisma.task.findUniqueOrThrow>> & { division: { name: string } },
+  task: Awaited<ReturnType<typeof prisma.task.findUniqueOrThrow>> & { division: { name: string; slug: string } },
 ) {
   const route = resolveModel(agent.agentRole.modelClass, agent.modelVariant);
   const prompt = executorPrompt({
@@ -77,6 +88,7 @@ async function runStandardExecutor(
   // Long output goes to object storage; the task row only keeps a short summary + the key.
   const objectKey = await objectStorage.putTaskOutput(task.id, "executor-output.md", content, "text/markdown");
   await storeAsPdf(task.id, task.title, content);
+  await commitCodeIfPresent(task.id, task.title, task.division.slug, content);
   const summary = content.length > 500 ? `${content.slice(0, 500)}…` : content;
   await apiClient.recordResult(task.id, summary, objectKey);
   await apiClient.setAgentStatus(agent.id, "IDLE");
@@ -97,7 +109,7 @@ async function runPmExecutor(
   agent: Awaited<ReturnType<typeof prisma.agent.findUniqueOrThrow>> & {
     agentRole: { name: string; responsibilities: string | null; modelClass: any; division: any; divisionId: string };
   },
-  task: Awaited<ReturnType<typeof prisma.task.findUniqueOrThrow>> & { division: { name: string } },
+  task: Awaited<ReturnType<typeof prisma.task.findUniqueOrThrow>> & { division: { name: string; slug: string } },
 ) {
   const route = resolveModel(agent.agentRole.modelClass, agent.modelVariant);
   const prompt = pmExecutorPrompt({
@@ -148,6 +160,7 @@ async function runPmExecutor(
 
   const objectKey = await objectStorage.putTaskOutput(task.id, "executor-output.md", parsed.summary, "text/markdown");
   await storeAsPdf(task.id, task.title, parsed.summary);
+  await commitCodeIfPresent(task.id, task.title, task.division.slug, parsed.summary);
   const summary = parsed.summary.length > 500 ? `${parsed.summary.slice(0, 500)}…` : parsed.summary;
   await apiClient.recordResult(task.id, summary, objectKey);
   await apiClient.setAgentStatus(agent.id, "IDLE");
@@ -230,6 +243,41 @@ async function storeAsPdf(taskId: string, title: string, content: string) {
   } catch (err) {
     console.error(`[task-assigned] gagal membuat PDF untuk task ${taskId}:`, err);
   }
+}
+
+/**
+ * "Output yang menghasilkan source code otomatis tersimpan di Github" -
+ * scans the executor's markdown result for fenced code blocks with a
+ * recognized language and, if any exist, commits each as its own file to
+ * the dedicated output repo, grouped under `<divisionSlug>/<taskId>-<slug
+ * of title>/`. A report with no code fences (the common case) is a no-op -
+ * this never runs for plain text output. Best-effort like storeAsPdf: a
+ * GitHub API hiccup must never block the task from completing.
+ */
+async function commitCodeIfPresent(taskId: string, title: string, divisionSlug: string, content: string) {
+  if (!github) return; // GITHUB_PAT not configured - skip silently rather than crash
+  const blocks = extractCodeBlocks(content);
+  if (blocks.length === 0) return;
+
+  const folder = `${divisionSlug}/${taskId}-${slugify(title)}`;
+  for (const block of blocks) {
+    try {
+      await github.putFile(`${folder}/${block.filename}`, block.code, `${title} - ${block.filename}`);
+    } catch (err) {
+      console.error(`[task-assigned] gagal commit ${block.filename} untuk task ${taskId} ke GitHub:`, err);
+    }
+  }
+}
+
+function slugify(text: string): string {
+  return (
+    text
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 60) || "task"
+  );
 }
 
 export type { TaskAssignedPayload };

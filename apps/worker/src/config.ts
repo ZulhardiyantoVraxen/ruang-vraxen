@@ -22,6 +22,16 @@ export const config = {
     secretAccessKey: process.env.OBJECT_STORAGE_SECRET_KEY ?? "platform123",
     bucket: process.env.OBJECT_STORAGE_BUCKET ?? "agent-outputs",
   },
+  // "Output yang menghasilkan source code otomatis tersimpan di Github" - a
+  // dedicated repo for agent work output, separate from this platform's own
+  // repo. Optional: with no token set, code-commit is silently skipped
+  // (same fail-open philosophy as PDF generation) rather than crashing a
+  // task just because GitHub isn't configured yet.
+  github: {
+    token: process.env.GITHUB_PAT,
+    owner: process.env.GITHUB_OWNER ?? "",
+    repo: process.env.GITHUB_REPO ?? "",
+  },
 };
 
 export { required };
