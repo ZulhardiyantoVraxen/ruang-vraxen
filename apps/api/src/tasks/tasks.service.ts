@@ -116,6 +116,23 @@ export class TasksService {
   }
 
   /**
+   * The executor run itself errored out before producing any result (model
+   * rejected by OpenRouter, network failure, etc.) - as opposed to qaFailed,
+   * which judges a result that DID get produced. Without this, a task stuck
+   * mid-run from an uncaught error never frees its agent's concurrency slot
+   * or drains whatever that agent had queued behind it (see
+   * `completeAssignment`/`drainQueueForAgent`), silently freezing that seat.
+   */
+  async failTask(taskId: string, reason: string) {
+    const task = await this.prisma.task.update({
+      where: { id: taskId },
+      data: { resultSummary: reason.slice(0, 500), status: "FAILED" },
+    });
+    await this.completeAssignment(taskId, "EXECUTOR");
+    return task;
+  }
+
+  /**
    * Marks the agent's open assignment for this task/role done, freeing their
    * concurrency slot, then immediately checks whether that agent has a
    * director command sitting queued (see `broadcast` below) and activates

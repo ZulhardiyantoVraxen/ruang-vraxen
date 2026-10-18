@@ -45,12 +45,20 @@ async function main() {
 
         // Without this, an unhandled error partway through handleTaskAssigned
         // (e.g. OpenRouter rejecting a free model slug, a model timing out)
-        // leaves the agent stuck WORKING forever - it never becomes eligible
-        // for its next task again, silently freezing that seat. Best-effort:
-        // if even this fails, the agent stays stuck and needs a manual nudge,
-        // but at least the rest of the division keeps running.
+        // leaves the task RUNNING and the agent's concurrency slot occupied
+        // forever - apiClient.failTask is what actually frees the slot AND
+        // drains anything queued behind it (see TasksService.failTask); the
+        // agent IDLE reset alongside it is just the display status, since
+        // the next drained task (if any) immediately flips it back to
+        // WORKING anyway. Best-effort: if even this fails, the task/agent
+        // stay stuck and need a manual nudge, but the rest of the division
+        // keeps running.
         if (event.eventType === "task.assigned") {
           const agentId = (event.payload as TaskAssignedPayload | undefined)?.agentId;
+          const reason = err instanceof Error ? err.message : String(err);
+          await apiClient.failTask(event.aggregateId, reason).catch((failErr) => {
+            console.error(`[worker] also failed to mark task ${event.aggregateId} FAILED after the error above:`, failErr);
+          });
           if (agentId) {
             await apiClient.setAgentStatus(agentId, "IDLE").catch((resetErr) => {
               console.error(`[worker] also failed to reset agent ${agentId} to IDLE after the error above:`, resetErr);

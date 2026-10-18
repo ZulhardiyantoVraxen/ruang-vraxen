@@ -178,6 +178,7 @@ enum TaskStatus {
   AWAITING_DIRECTOR // paused: the executor (a PM/decision-point role) asked the director a question - see DirectorQuestion
   DONE
   REJECTED
+  FAILED // the executor run itself errored out (model rejected, network failure, etc.) - distinct from REJECTED, which is a human/QA judgment call on a result that DID get produced
 }
 
 model Task {

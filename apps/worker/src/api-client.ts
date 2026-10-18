@@ -22,6 +22,8 @@ export const apiClient = {
     post(`/tasks/${taskId}/result`, { resultSummary, resultObjectKey }, "PATCH"),
   qaPassed: (taskId: string) => post(`/tasks/${taskId}/qa-passed`, {}),
   qaFailed: (taskId: string) => post(`/tasks/${taskId}/qa-failed`, {}),
+  /** The executor run itself blew up before producing a result - frees the agent's concurrency slot and drains their queue, unlike qaFailed. */
+  failTask: (taskId: string, reason: string) => post(`/tasks/${taskId}/fail`, { reason }),
   recordUsage: (params: {
     agentId: string;
     taskId?: string;

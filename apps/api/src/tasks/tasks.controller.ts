@@ -52,6 +52,17 @@ export class TasksController {
     return this.service.qaFailed(id);
   }
 
+  /**
+   * Called by apps/worker when the executor run itself blows up (OpenRouter
+   * rejects the model, a network error, etc.) - distinct from qa-failed,
+   * which assumes a result was actually produced and reviewed. This is what
+   * frees the agent's concurrency slot and drains their queued work (see
+   * TasksService.failTask) so one bad model slug doesn't freeze that seat.
+   */
+  @Post(":id/fail") fail(@Param("id") id: string, @Body() body: { reason: string }) {
+    return this.service.failTask(id, body.reason);
+  }
+
   @Post(":id/qa-passed") qaPassed(@Param("id") id: string) {
     return this.service.qaPassed(id);
   }
