@@ -234,14 +234,12 @@ enum DirectorQuestionStatus {
   ANSWERED
 }
 
-/**
- * "PM harus lebih interaktif bertanya kepada direktur": a PM/decision-point
- * agent (any AgentRole.requiresApproval=true role - Chief of Staff included)
- * can raise a question instead of (or ahead of) delivering a task result.
- * taskId is nullable so a question can also stand alone, not tied to one
- * specific task. Answering one tied to a task un-pauses it - see
- * ApprovalsModule-style wiring in DirectorQuestionsService.
- */
+// "PM harus lebih interaktif bertanya kepada direktur": a PM/decision-point
+// agent (any AgentRole.requiresApproval=true role - Chief of Staff included)
+// can raise a question instead of (or ahead of) delivering a task result.
+// taskId is nullable so a question can also stand alone, not tied to one
+// specific task. Answering one tied to a task un-pauses it - see
+// ApprovalsModule-style wiring in DirectorQuestionsService.
 model DirectorQuestion {
   id          String                 @id @default(cuid())
   taskId      String?
