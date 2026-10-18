@@ -32,6 +32,15 @@ export const config = {
     owner: process.env.GITHUB_OWNER ?? "",
     repo: process.env.GITHUB_REPO ?? "",
   },
+  // "Finance membuat dokumen per project di Google Sheets" - optional, same
+  // fail-open philosophy as `github` above: with no service account
+  // configured yet, budget calculation still works, just skips creating the
+  // actual spreadsheet (and apps/web's Archive keeps showing no Drive link).
+  google: {
+    serviceAccountEmail: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+    privateKey: process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY,
+    driveFolderId: process.env.GOOGLE_DRIVE_FOLDER_ID,
+  },
 };
 
 export { required };

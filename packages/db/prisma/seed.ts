@@ -114,7 +114,7 @@ async function seedDefaultOrg() {
       roles: [
         { name: "Chief of Staff", tier: ModelTier.ATAS, responsibilities: "Menggabungkan laporan 4 PM jadi antrean persetujuan Anda", requiresApproval: true, agent: "Raka Pratama" },
         { name: "Auditor", tier: ModelTier.ATAS, responsibilities: "Cek acak semua divisi, butuh penalaran kritis", agent: "Dewi Anggraini" },
-        { name: "Finance", tier: ModelTier.RUTIN, responsibilities: "Rekap invoice, biaya proyek, token", agent: "Budi Santoso" },
+        { name: "Finance", tier: ModelTier.RUTIN, responsibilities: "Menghitung estimasi budget tiap project per fase pengerjaan, lalu membuat dokumennya sendiri di Google Sheets", agent: "Budi Santoso" },
       ],
     },
     {

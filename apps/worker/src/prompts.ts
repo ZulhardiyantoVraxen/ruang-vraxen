@@ -76,6 +76,38 @@ export function pmExecutorPrompt(params: {
     .join("\n");
 }
 
+/**
+ * Finance's one job now ("Finance hanya perlu skill untuk menghitung nilai
+ * budget project ... dalam beberapa fase") - estimate a project's budget
+ * broken into phases, as structured JSON the worker turns straight into a
+ * Google Sheet (see GoogleSheetsClient + runFinanceExecutor in
+ * task-assigned.ts). No free-text fallback path here on purpose: a budget
+ * that isn't phase-broken-down numbers isn't useful for this role.
+ */
+export function financeBudgetPrompt(params: {
+  taskTitle: string;
+  taskDescription: string | null;
+  projectName: string | null;
+}) {
+  return [
+    `Kamu adalah Finance pada sebuah perusahaan virtual. Tugasmu di sini HANYA satu: hitung estimasi nilai`,
+    `budget untuk project ini, dipecah per fase pengerjaan yang wajar (misalnya: Perencanaan, Pengembangan,`,
+    `Testing/QA, Deployment/Peluncuran - sesuaikan fase dengan jenis project, tidak harus selalu 4 fase itu).`,
+    ``,
+    params.projectName ? `Project: ${params.projectName}` : "",
+    `Judul task: ${params.taskTitle}`,
+    params.taskDescription ? `Detail: ${params.taskDescription}` : "",
+    ``,
+    `Gunakan satuan Rupiah (angka polos, tanpa "Rp" atau titik/koma pemisah ribuan) dan asumsi yang wajar`,
+    `kalau detail project tidak lengkap - sebutkan asumsi itu di "notes".`,
+    ``,
+    `Balas HANYA dengan JSON, tanpa teks lain, persis bentuk ini:`,
+    `{"phases":[{"name":"Nama fase","amount":12000000}, ...],"notes":"asumsi/catatan singkat"}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 export function chiefOfStaffTriagePrompt(params: {
   taskTitle: string;
   taskDescription: string | null;

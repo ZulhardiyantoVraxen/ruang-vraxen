@@ -6,4 +6,5 @@ export * from "./model-routing";
 export * from "./model-capability";
 export * from "./pdf/markdown-to-pdf";
 export * from "./clients/github-client";
+export * from "./clients/google-sheets-client";
 export * from "./github/extract-code-blocks";

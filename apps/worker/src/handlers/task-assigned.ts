@@ -7,9 +7,10 @@ import {
   resolveModel,
   markdownToPdfBuffer,
   GitHubClient,
+  GoogleSheetsClient,
   extractCodeBlocks,
 } from "@platform/shared";
-import { executorPrompt, pmExecutorPrompt, chiefOfStaffRelayPrompt, reviewerPrompt } from "../prompts";
+import { executorPrompt, pmExecutorPrompt, financeBudgetPrompt, chiefOfStaffRelayPrompt, reviewerPrompt } from "../prompts";
 
 const openRouter = new OpenRouterClient(config.openRouterApiKey);
 const objectStorage = new ObjectStorageClient(config.objectStorage);
@@ -46,9 +47,15 @@ export async function handleTaskAssigned(taskId: string, payload: TaskAssignedPa
   // question to the director instead of forcing a guess.
   if (agent.agentRole.requiresApproval) {
     await runPmExecutor(agent, task);
+  } else if (isFinance(agent.agentRole.name, task.division.slug)) {
+    await runFinanceExecutor(agent, task);
   } else {
     await runStandardExecutor(agent, task);
   }
+}
+
+function isFinance(roleName: string, divisionSlug: string): boolean {
+  return divisionSlug === "pusat" && roleName.toLowerCase() === "finance";
 }
 
 async function runStandardExecutor(
@@ -93,6 +100,134 @@ async function runStandardExecutor(
   await apiClient.setAgentStatus(agent.id, "IDLE");
 
   await runQaIfReviewerAssigned(task.id, content);
+}
+
+/**
+ * "Finance hanya perlu skill untuk menghitung nilai budget project ... dalam
+ * beberapa fase, nanti dia membuat dokumen per project itu sendiri di Google
+ * Sheets" - Finance's entire job now, replacing the old generic
+ * executorPrompt free-text path. The model replies with phase-broken-down
+ * numbers; this turns that straight into a Google Sheet via
+ * GoogleSheetsClient (best-effort - if GOOGLE_* env vars aren't configured
+ * yet, the budget is still computed and recorded as the task result, just
+ * without an actual spreadsheet).
+ */
+async function runFinanceExecutor(
+  agent: Awaited<ReturnType<typeof prisma.agent.findUniqueOrThrow>> & {
+    agentRole: { name: string; responsibilities: string | null; modelClass: any; division: any };
+  },
+  task: Awaited<ReturnType<typeof prisma.task.findUniqueOrThrow>> & {
+    division: { name: string; slug: string };
+    projectId: string | null;
+  },
+) {
+  const route = resolveModel(agent.agentRole.modelClass, agent.modelVariant, {
+    roleName: agent.agentRole.name,
+    responsibilities: agent.agentRole.responsibilities,
+  });
+  const project = task.projectId ? await prisma.project.findUnique({ where: { id: task.projectId } }) : null;
+  const prompt = financeBudgetPrompt({
+    taskTitle: task.title,
+    taskDescription: task.description,
+    projectName: project?.name ?? null,
+  });
+
+  const { content, tokensIn, tokensOut } = await openRouter.chat(route.modelId, [
+    { role: "system", content: agent.systemPrompt ?? "Kamu adalah Finance, hitung estimasi budget project dengan teliti." },
+    { role: "user", content: prompt },
+  ]);
+
+  await apiClient.recordUsage({
+    agentId: agent.id,
+    taskId: task.id,
+    modelUsed: route.modelId,
+    modelVariant: route.variant,
+    source: "kanban",
+    tokensIn,
+    tokensOut,
+  });
+
+  type BudgetReply = { phases: { name: string; amount: number }[]; notes?: string };
+  let parsed: BudgetReply | null = null;
+  try {
+    const unfenced = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+    const candidate = JSON.parse(unfenced);
+    if (!Array.isArray(candidate?.phases)) throw new Error("missing phases[]");
+    parsed = candidate;
+  } catch {
+    parsed = null;
+  }
+
+  if (!parsed) {
+    // Model didn't return clean budget JSON - record the raw reply as a
+    // plain result rather than crashing the consumer loop, same fail-safe
+    // philosophy as the PM/QA JSON parses below.
+    const summary = content.length > 500 ? `${content.slice(0, 500)}…` : content;
+    const objectKey = await objectStorage.putTaskOutput(task.id, "executor-output.md", content, "text/markdown");
+    await apiClient.recordResult(task.id, summary, objectKey);
+    await apiClient.setAgentStatus(agent.id, "IDLE");
+    await runQaIfReviewerAssigned(task.id, content);
+    return;
+  }
+
+  const total = parsed.phases.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  const fmt = (n: number) => `Rp ${n.toLocaleString("id-ID")}`;
+  const summaryLines = [
+    project?.name ? `Estimasi budget project "${project.name}":` : "Estimasi budget:",
+    ...parsed.phases.map((p) => `- ${p.name}: ${fmt(Number(p.amount) || 0)}`),
+    `Total: ${fmt(total)}`,
+    parsed.notes ? `Catatan: ${parsed.notes}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const objectKey = await objectStorage.putTaskOutput(task.id, "executor-output.md", summaryLines, "text/markdown");
+  await storeAsPdf(task.id, task.title, summaryLines);
+  await createBudgetSheetIfConfigured(task.id, project?.name ?? task.title, parsed, total);
+
+  const summary = summaryLines.length > 500 ? `${summaryLines.slice(0, 500)}…` : summaryLines;
+  await apiClient.recordResult(task.id, summary, objectKey);
+  await apiClient.setAgentStatus(agent.id, "IDLE");
+
+  await runQaIfReviewerAssigned(task.id, summaryLines);
+}
+
+/**
+ * Creates the actual Google Sheet for a Finance budget task and drops the
+ * same marker-file pattern as commitCodeIfPresent's github-output.json - the
+ * Archive page already reads `${taskId}/drive-output.json`, so no apps/api
+ * or apps/web change is needed for the link to show up there. Best-effort:
+ * with no GOOGLE_* env vars set yet, this silently skips (budget numbers are
+ * still recorded as the task result either way).
+ */
+async function createBudgetSheetIfConfigured(
+  taskId: string,
+  sheetTitleSuffix: string,
+  budget: { phases: { name: string; amount: number }[]; notes?: string },
+  total: number,
+) {
+  const { serviceAccountEmail, privateKey, driveFolderId } = config.google;
+  if (!serviceAccountEmail || !privateKey || !driveFolderId) return;
+
+  try {
+    const sheets = new GoogleSheetsClient({ clientEmail: serviceAccountEmail, privateKey, driveFolderId });
+    const rows: (string | number)[][] = [
+      ["Fase", "Nominal (Rp)"],
+      ...budget.phases.map((p) => [p.name, Number(p.amount) || 0]),
+      ["Total", total],
+    ];
+    if (budget.notes) rows.push([], ["Catatan", budget.notes]);
+
+    const sheet = await sheets.createBudgetSheet(`Budget - ${sheetTitleSuffix}`, rows);
+    await objectStorage.putTaskOutput(
+      taskId,
+      "drive-output.json",
+      JSON.stringify({ url: sheet.url, spreadsheetId: sheet.spreadsheetId, createdAt: new Date().toISOString() }),
+      "application/json",
+    );
+  } catch (err) {
+    console.error(`[task-assigned] gagal membuat Google Sheet budget untuk task ${taskId}:`, err);
+  }
 }
 
 /**

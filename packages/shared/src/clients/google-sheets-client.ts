@@ -1,0 +1,100 @@
+import { createSign } from "node:crypto";
+
+/**
+ * Thin, framework-free Google Sheets + Drive client - same philosophy as
+ * GitHubClient: one external service, one place that talks to it, plain
+ * `fetch` calls instead of pulling in the full `googleapis` SDK.
+ *
+ * Auth is a service account JWT (RFC 7523) signed locally with Node's
+ * built-in `crypto`, exchanged for a short-lived access token - no OAuth
+ * consent flow needed since this never acts as a real person, only as the
+ * platform's own "Ruang Vraxen Finance" identity.
+ *
+ * "Finance membuat dokumen per project di Google Sheets" - this creates one
+ * spreadsheet per call (per budget task) inside a folder the director has
+ * already shared with the service account, so every sheet it makes shows up
+ * in the director's own Drive without any further sharing step per file.
+ */
+export class GoogleSheetsClient {
+  private readonly clientEmail: string;
+  private readonly privateKey: string;
+  private readonly driveFolderId: string;
+  private cachedToken: { token: string; expiresAt: number } | null = null;
+
+  constructor(config: { clientEmail: string; privateKey: string; driveFolderId: string }) {
+    this.clientEmail = config.clientEmail;
+    // .env stores the PEM with literal "\n" sequences (real newlines aren't
+    // valid in a single env var line) - undo that before handing it to crypto.
+    this.privateKey = config.privateKey.includes("\\n") ? config.privateKey.replace(/\\n/g, "\n") : config.privateKey;
+    this.driveFolderId = config.driveFolderId;
+  }
+
+  private base64url(input: Buffer | string): string {
+    return (Buffer.isBuffer(input) ? input : Buffer.from(input)).toString("base64url");
+  }
+
+  private async getAccessToken(): Promise<string> {
+    const now = Math.floor(Date.now() / 1000);
+    if (this.cachedToken && this.cachedToken.expiresAt > now + 30) return this.cachedToken.token;
+
+    const header = { alg: "RS256", typ: "JWT" };
+    const claims = {
+      iss: this.clientEmail,
+      scope: "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive",
+      aud: "https://oauth2.googleapis.com/token",
+      iat: now,
+      exp: now + 3600,
+    };
+    const signingInput = `${this.base64url(JSON.stringify(header))}.${this.base64url(JSON.stringify(claims))}`;
+    const signature = createSign("RSA-SHA256").update(signingInput).sign(this.privateKey);
+    const assertion = `${signingInput}.${this.base64url(signature)}`;
+
+    const res = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+        assertion,
+      }),
+    });
+    if (!res.ok) throw new Error(`Google OAuth token gagal (${res.status}): ${await res.text()}`);
+    const body = (await res.json()) as { access_token: string; expires_in: number };
+    this.cachedToken = { token: body.access_token, expiresAt: now + body.expires_in };
+    return body.access_token;
+  }
+
+  /**
+   * Creates a new spreadsheet with one sheet of `rows`, moves it into the
+   * shared budget folder, and returns its id + editable Drive URL.
+   */
+  async createBudgetSheet(title: string, rows: (string | number)[][]): Promise<{ spreadsheetId: string; url: string }> {
+    const token = await this.getAccessToken();
+    const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+
+    const createRes = await fetch("https://sheets.googleapis.com/v4/spreadsheets", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ properties: { title }, sheets: [{ properties: { title: "Budget" } }] }),
+    });
+    if (!createRes.ok) throw new Error(`Google Sheets create gagal (${createRes.status}): ${await createRes.text()}`);
+    const created = (await createRes.json()) as { spreadsheetId: string };
+    const spreadsheetId = created.spreadsheetId;
+
+    const valuesRes = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Budget!A1?valueInputOption=USER_ENTERED`,
+      { method: "PUT", headers, body: JSON.stringify({ values: rows }) },
+    );
+    if (!valuesRes.ok) throw new Error(`Google Sheets isi nilai gagal (${valuesRes.status}): ${await valuesRes.text()}`);
+
+    // A freshly-created spreadsheet lives in the service account's own
+    // (invisible-to-humans) My Drive - move it into the folder the director
+    // already shared with the service account so it shows up for them too.
+    const moveRes = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${spreadsheetId}?addParents=${this.driveFolderId}&removeParents=root&fields=id,parents`,
+      { method: "PATCH", headers: { Authorization: `Bearer ${token}` } },
+    );
+    if (!moveRes.ok) throw new Error(`Google Drive pindah folder gagal (${moveRes.status}): ${await moveRes.text()}`);
+
+    return { spreadsheetId, url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit` };
+  }
+}
