@@ -9,9 +9,10 @@
 
 .header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 12px;
   flex: none;
+  flex-wrap: wrap;
 }
 
 .header h1 {
@@ -25,6 +26,27 @@
   font-size: 12.5px;
   color: #7f91a3;
   font-family: var(--font-mono), monospace;
+  margin-left: auto;
+}
+
+.filters {
+  display: flex;
+  gap: 8px;
+}
+
+.filterSelect {
+  background: #0d1826;
+  border: 1px solid #1c2b3a;
+  border-radius: 8px;
+  padding: 6px 10px;
+  color: #eef3f7;
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.filterSelect:focus {
+  outline: none;
+  border-color: #5fc9b8;
 }
 
 /* Columns lay out side by side and scroll horizontally if they overflow the
@@ -118,6 +140,15 @@
   }
 }
 
+.cardProject {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: #9f8fe0;
+  margin: 0 0 3px;
+}
+
 .cardDivision {
   font-size: 10px;
   font-weight: 700;
@@ -137,7 +168,8 @@
 .cardMeta {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
   margin-top: 7px;
 }
 
@@ -147,10 +179,28 @@
   color: #7f91a3;
 }
 
+.cardPic {
+  font-size: 10px;
+  color: #5fc9b8;
+}
+
 .cardTime {
   font-size: 10px;
   color: #4f6070;
   font-family: var(--font-mono), monospace;
+  margin-left: auto;
+}
+
+.cardDue {
+  font-size: 10px;
+  color: #7f91a3;
+  margin-top: 5px;
+  font-family: var(--font-mono), monospace;
+}
+
+.cardDueLate {
+  color: #e06c5b;
+  font-weight: 600;
 }
 
 .cardSummary {

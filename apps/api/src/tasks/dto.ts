@@ -1,4 +1,4 @@
-import { ArrayMinSize, IsArray, IsBoolean, IsInt, IsOptional, IsString, Min } from "class-validator";
+import { ArrayMinSize, IsArray, IsBoolean, IsDateString, IsInt, IsOptional, IsString, Min } from "class-validator";
 
 export class CreateTaskDto {
   @IsString() divisionSlug!: string;
@@ -7,6 +7,8 @@ export class CreateTaskDto {
   @IsOptional() @IsString() parentTaskId?: string; // set => this is a parallel subtask
   @IsOptional() @IsInt() @Min(1) priority?: number;
   @IsOptional() @IsBoolean() requiresApproval?: boolean;
+  @IsOptional() @IsString() projectId?: string; // group this task under a director-visible Project
+  @IsOptional() @IsDateString() dueAt?: string; // deadline shown on the Task Board card
 }
 
 /** Chief of Staff's own routing decision - which division/agent actually gets the task. */
@@ -35,4 +37,6 @@ export class TriageTaskDto {
 export class BroadcastCommandDto {
   @IsArray() @ArrayMinSize(1) @IsString({ each: true }) agentIds!: string[];
   @IsString() instruction!: string;
+  @IsOptional() @IsString() projectId?: string;
+  @IsOptional() @IsDateString() dueAt?: string;
 }

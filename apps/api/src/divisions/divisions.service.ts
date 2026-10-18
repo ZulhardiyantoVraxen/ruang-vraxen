@@ -18,7 +18,10 @@ export class DivisionsService {
         agentRoles: { include: { agents: true, modelClass: true } },
         // Top-level tasks only (no subtasks) - just enough for the office
         // view's per-division completion % and "what are they working on"
-        // whiteboard detail, so this stays light even with a busy backlog.
+        // whiteboard detail, the agent-detail modal's "tugas saya" list, and
+        // the Task Board's PIC/deadline/project columns - so this stays
+        // light even with a busy backlog (no subtask fan-out, no QA prompt
+        // text).
         tasks: {
           where: { parentTaskId: null },
           orderBy: { updatedAt: "desc" },
@@ -30,6 +33,14 @@ export class DivisionsService {
             requiresApproval: true,
             resultSummary: true,
             updatedAt: true,
+            createdAt: true,
+            dueAt: true,
+            projectId: true,
+            project: { select: { id: true, name: true } },
+            assignments: {
+              orderBy: { assignedAt: "desc" },
+              select: { role: true, agent: { select: { id: true, displayName: true } } },
+            },
           },
         },
       },

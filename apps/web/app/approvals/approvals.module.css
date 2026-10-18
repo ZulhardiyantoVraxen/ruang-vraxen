@@ -1,0 +1,198 @@
+.page {
+  padding: 24px;
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.header h1 {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0 0 4px;
+  color: #eef3f7;
+}
+
+.subtitle {
+  font-size: 12.5px;
+  color: #7f91a3;
+  margin: 0;
+  max-width: 520px;
+  line-height: 1.5;
+}
+
+.headerCount {
+  flex: none;
+  font-size: 12px;
+  color: #9f8fe0;
+  background: #1a1530;
+  border: 1px solid #2c2450;
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-family: var(--font-mono), monospace;
+  white-space: nowrap;
+}
+
+.error {
+  color: #e06c5b;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.empty {
+  color: #5c7085;
+  font-size: 13px;
+  padding: 24px 0;
+  text-align: center;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.card {
+  background: #0d1826;
+  border: 1px solid #1c2b3a;
+  border-radius: 14px;
+  padding: 16px 18px;
+}
+
+.cardTop {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.cardTitle {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: #eef3f7;
+  margin: 0 0 4px;
+}
+
+.cardMeta {
+  font-size: 11.5px;
+  color: #7f91a3;
+  margin: 0;
+}
+
+.priorityPill {
+  flex: none;
+  font-size: 10.5px;
+  font-family: var(--font-mono), monospace;
+  color: #9fe6d8;
+  background: #0b2a24;
+  border: 1px solid #1d4c42;
+  border-radius: 6px;
+  padding: 2px 7px;
+}
+
+.cardDescription {
+  font-size: 12.5px;
+  color: #c3cdd7;
+  margin: 10px 0 0;
+  line-height: 1.5;
+}
+
+.resultBox {
+  margin-top: 10px;
+  background: #0b141f;
+  border: 1px solid #1c2b3a;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.resultLabel {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #5fc9b8;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0 0 4px;
+}
+
+.resultText {
+  font-size: 12.5px;
+  color: #c3cdd7;
+  margin: 0;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.notesInput {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 12px;
+  background: #0b141f;
+  border: 1px solid #243545;
+  border-radius: 9px;
+  padding: 8px 10px;
+  color: #eef3f7;
+  font-size: 12px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.notesInput:focus {
+  outline: none;
+  border-color: #5fc9b8;
+}
+
+.notesInput::placeholder {
+  color: #4f6070;
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.approveButton,
+.rejectButton {
+  flex: 1;
+  padding: 9px 0;
+  border-radius: 9px;
+  border: none;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  transition: filter 0.15s ease, transform 0.1s ease;
+}
+
+.approveButton {
+  background: linear-gradient(135deg, #5fc9b8, #3d9c8f);
+  color: #06201a;
+}
+
+.rejectButton {
+  background: none;
+  border: 1px solid #3a2a2a;
+  color: #e4998f;
+}
+
+.approveButton:hover:not(:disabled),
+.rejectButton:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.approveButton:active:not(:disabled),
+.rejectButton:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.approveButton:disabled,
+.rejectButton:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

@@ -40,13 +40,23 @@ export const api = {
     description?: string;
     priority?: number;
     requiresApproval?: boolean;
+    projectId?: string;
+    dueAt?: string;
   }) => request<any>("/tasks", { method: "POST", body: JSON.stringify(payload) }),
-  /** "Perintah sekaligus" - one instruction, fanned out to any number of agents at once. */
-  broadcastCommand: (agentIds: string[], instruction: string) =>
-    request<{ dispatched: { agentId: string; agentName: string; taskId: string }[]; failed: { agentId: string; agentName: string; reason: string }[] }>(
-      "/tasks/broadcast",
-      { method: "POST", body: JSON.stringify({ agentIds, instruction }) }
-    ),
+  /**
+   * "Perintah sekaligus" - one instruction, fanned out to any number of
+   * agents at once. `queued: true` in the result means the agent was busy
+   * and the director's order is reserved to start the instant they free up
+   * - never silently dropped.
+   */
+  broadcastCommand: (payload: { agentIds: string[]; instruction: string; projectId?: string; dueAt?: string }) =>
+    request<{
+      dispatched: { agentId: string; agentName: string; taskId: string; queued: boolean }[];
+      failed: { agentId: string; agentName: string; reason: string }[];
+    }>("/tasks/broadcast", { method: "POST", body: JSON.stringify(payload) }),
+  listProjects: () => request<any[]>("/projects"),
+  createProject: (name: string, description?: string) =>
+    request<any>("/projects", { method: "POST", body: JSON.stringify({ name, description }) }),
   /** The director's queue of questions raised by PM/decision-point agents mid-task. */
   openQuestions: () => request<any[]>("/questions/open"),
   answerQuestion: (id: string, answer: string) =>

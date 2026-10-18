@@ -71,10 +71,11 @@ export class QuestionsService {
             .join("\n\n"),
         },
       });
-      // Re-assigning (rather than just flipping status) is what actually
-      // fires the worker's task.assigned handler again, so the agent picks
-      // the task back up with the director's answer now in its context.
-      await this.tasks.assign(task.id, question.agentId, "EXECUTOR");
+      // Resuming (rather than assigning fresh) reuses the SAME assignment
+      // that's been open since the agent paused to ask - they never gave up
+      // their concurrency slot, so this must not run the normal limit check
+      // (and must not create a second assignment row for the same task).
+      await this.tasks.resumeExecutor(task.id, question.agentId);
     }
 
     return question;

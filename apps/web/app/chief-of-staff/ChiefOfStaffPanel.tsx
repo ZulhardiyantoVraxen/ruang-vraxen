@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import styles from "./chiefOfStaff.module.css";
 
@@ -73,6 +73,8 @@ function initials(name: string) {
   return ((parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "")).toUpperCase() || "?";
 }
 
+type Project = { id: string; name: string };
+
 export default function ChiefOfStaffPanel({ pusat }: { pusat: Division | null }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -81,6 +83,13 @@ export default function ChiefOfStaffPanel({ pusat }: { pusat: Division | null })
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tasks, setTasks] = useState<Task[]>(pusat?.tasks ?? []);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectId, setProjectId] = useState("");
+  const [dueAt, setDueAt] = useState("");
+
+  useEffect(() => {
+    api.listProjects().then(setProjects).catch(() => {});
+  }, []);
 
   const chiefOfStaff = useMemo(() => {
     const role = pusat?.agentRoles.find((r) => r.name.toLowerCase().includes("chief of staff"));
@@ -98,12 +107,15 @@ export default function ChiefOfStaffPanel({ pusat }: { pusat: Division | null })
         description: description.trim() || undefined,
         priority,
         requiresApproval,
+        projectId: projectId || undefined,
+        dueAt: dueAt ? new Date(dueAt).toISOString() : undefined,
       });
       setTasks((prev) => [task, ...prev]);
       setTitle("");
       setDescription("");
       setPriority(3);
       setRequiresApproval(true);
+      setDueAt("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Gagal mengirim pekerjaan.");
     } finally {
@@ -133,7 +145,7 @@ export default function ChiefOfStaffPanel({ pusat }: { pusat: Division | null })
         )}
       </div>
 
-      {!pusat && <p className={styles.error}>Tidak bisa memuat divisi Pusat / Chief of Staff. Coba muat ulang halaman.</p>}
+      {!pusat && <p className={styles.error}>Tidak bisa memuat divisi Direktur / Chief of Staff. Coba muat ulang halaman.</p>}
 
       {pusat && (
         <div className={styles.card}>
@@ -163,6 +175,26 @@ export default function ChiefOfStaffPanel({ pusat }: { pusat: Division | null })
                 <option value={4}>4</option>
                 <option value={5}>5 - Terendah</option>
               </select>
+            </label>
+            <label className={styles.priorityLabel}>
+              Project (opsional)
+              <select className={styles.prioritySelect} value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+                <option value="">Tanpa project</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={styles.priorityLabel}>
+              Deadline (opsional)
+              <input
+                type="datetime-local"
+                className={styles.prioritySelect}
+                value={dueAt}
+                onChange={(e) => setDueAt(e.target.value)}
+              />
             </label>
             <label className={styles.toggle} onClick={() => setRequiresApproval((v) => !v)}>
               <span className={`${styles.toggleTrack} ${requiresApproval ? styles.toggleTrackOn : ""}`}>

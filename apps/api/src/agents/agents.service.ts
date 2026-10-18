@@ -45,11 +45,16 @@ export class AgentsService {
     return agent;
   }
 
-  /** How many tasks an agent is currently carrying, vs. its role's concurrency ceiling. */
+  /**
+   * How many tasks an agent is currently carrying, vs. its role's
+   * concurrency ceiling. Excludes a queued-but-not-started director command
+   * (Task.status TODO - see TasksService.broadcast) - that's reserved work
+   * waiting its turn, not load actually occupying the agent right now.
+   */
   async currentLoad(agentId: string) {
     const agent = await this.prisma.agent.findUniqueOrThrow({
       where: { id: agentId },
-      include: { agentRole: true, assignments: { where: { completedAt: null } } },
+      include: { agentRole: true, assignments: { where: { completedAt: null, task: { status: { not: "TODO" } } } } },
     });
     return { active: agent.assignments.length, max: agent.agentRole.maxConcurrentTasks };
   }

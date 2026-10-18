@@ -29,6 +29,8 @@ export class TasksService {
         parentTaskId: dto.parentTaskId,
         priority: dto.priority ?? 3,
         requiresApproval: dto.requiresApproval ?? false,
+        projectId: dto.projectId,
+        dueAt: dto.dueAt ? new Date(dto.dueAt) : undefined,
       },
     });
     await this.kafka.publish(TOPICS.TASK_EVENTS, {
@@ -48,12 +50,98 @@ export class TasksService {
   }
 
   
-  /** Worker calls this once an executor agent finishes - stores the output, keeps state transitions in TasksService. */
+  /**
+   * Worker calls this once an executor agent finishes - stores the output,
+   * keeps state transitions in TasksService.
+   *
+   * This is also where the executor's concurrency slot is actually freed
+   * (see `completeAssignment` below). Freeing it here - the moment they
+   * submit, not whenever QA/approval eventually resolves - is what fixes
+   * the bug where an agent that had ever been given one task stayed
+   * reported "at its concurrency limit" forever: nothing in this codebase
+   * used to ever set TaskAssignment.completedAt, so every assignment ever
+   * made counted against the agent for good.
+   */
   async recordResult(taskId: string, resultSummary: string, resultObjectKey?: string) {
-    return this.prisma.task.update({
+    const task = await this.prisma.task.update({
       where: { id: taskId },
       data: { resultSummary, resultObjectKey, status: "REVIEW" },
     });
+    await this.completeAssignment(taskId, "EXECUTOR");
+    return task;
+  }
+
+  /**
+   * Marks the agent's open assignment for this task/role done, freeing their
+   * concurrency slot, then immediately checks whether that agent has a
+   * director command sitting queued (see `broadcast` below) and activates
+   * the oldest one if so - a director's order never gets silently dropped
+   * just because the agent was mid-task when it was sent.
+   */
+  private async completeAssignment(taskId: string, role: "EXECUTOR" | "REVIEWER") {
+    const assignment = await this.prisma.taskAssignment.findFirst({
+      where: { taskId, role, completedAt: null },
+      orderBy: { assignedAt: "desc" },
+    });
+    if (!assignment) return;
+    await this.prisma.taskAssignment.update({ where: { id: assignment.id }, data: { completedAt: new Date() } });
+    await this.drainQueueForAgent(assignment.agentId);
+  }
+
+  /**
+   * Activates the oldest command still queued for this agent (a broadcast
+   * that arrived while they were busy - see `broadcast`). Queued work is a
+   * TaskAssignment row that already exists (completedAt null, reserving the
+   * slot) but whose Task never left TODO because nothing started it yet.
+   */
+  private async drainQueueForAgent(agentId: string) {
+    const agent = await this.prisma.agent.findUniqueOrThrow({
+      where: { id: agentId },
+      // Same exclusion as `assign()` - a queued item's own reservation must
+      // not count against itself when checking if there's room to start it.
+      include: { agentRole: true, assignments: { where: { completedAt: null, task: { status: { not: "TODO" } } } } },
+    });
+    if (agent.assignments.length >= agent.agentRole.maxConcurrentTasks) return; // still full - next free-up will try again
+
+    const queued = await this.prisma.taskAssignment.findFirst({
+      where: { agentId, role: "EXECUTOR", completedAt: null, task: { status: "TODO" } },
+      orderBy: { assignedAt: "asc" },
+    });
+    if (!queued) return;
+
+    await this.prisma.task.update({ where: { id: queued.taskId }, data: { status: "RUNNING" } });
+    await this.kafka.publish(TOPICS.TASK_EVENTS, {
+      eventType: "task.assigned",
+      aggregateId: queued.taskId,
+      payload: { agentId, role: "EXECUTOR" },
+    });
+  }
+
+  /**
+   * "PM harus lebih interaktif bertanya kepada direktur" leaves a task
+   * AWAITING_DIRECTOR with its original EXECUTOR assignment still open
+   * (recordResult was never called - the PM asked a question instead of
+   * finishing). Resuming it reuses that same assignment and republishes
+   * task.assigned so the worker picks it back up - no new assignment row,
+   * no concurrency check, since the agent never actually gave up this slot.
+   */
+  async resumeExecutor(taskId: string, agentId: string) {
+    const existing = await this.prisma.taskAssignment.findFirst({
+      where: { taskId, agentId, role: "EXECUTOR", completedAt: null },
+    });
+    if (!existing) {
+      // Shouldn't normally happen, but never leave a question unanswered
+      // for lack of bookkeeping - fall back to a fresh (concurrency-checked)
+      // assignment.
+      return this.assign(taskId, agentId, "EXECUTOR");
+    }
+    await this.prisma.task.update({ where: { id: taskId }, data: { status: "RUNNING" } });
+    await this.kafka.publish(TOPICS.TASK_EVENTS, {
+      eventType: "task.assigned",
+      aggregateId: taskId,
+      payload: { agentId, role: "EXECUTOR" },
+    });
+    return existing;
   }
 
   /**
@@ -93,7 +181,11 @@ export class TasksService {
   async assign(taskId: string, agentId: string, role: "EXECUTOR" | "REVIEWER") {
     const agent = await this.prisma.agent.findUniqueOrThrow({
       where: { id: agentId },
-      include: { agentRole: true, assignments: { where: { completedAt: null } } },
+      // "task: { status: { not: "TODO" } }" excludes a queued-but-not-started
+      // director command (see `broadcast`) from counting against the limit -
+      // that reservation shouldn't itself block the agent from being given
+      // this (possibly different) piece of work right now.
+      include: { agentRole: true, assignments: { where: { completedAt: null, task: { status: { not: "TODO" } } } } },
     });
     if (agent.assignments.length >= agent.agentRole.maxConcurrentTasks) {
       throw new BadRequestException(
@@ -117,8 +209,16 @@ export class TasksService {
    * publishes "task.created" - only "task.assigned", which is what the
    * worker actually executes (apps/worker's handleTaskAssigned: sets the
    * agent WORKING, calls its tier's model with the instruction, records the
-   * result, sets it back to IDLE). An agent already at its concurrency
-   * limit is reported as a failure for that agent only - the rest still go out.
+   * result, sets it back to IDLE).
+   *
+   * "Perintah itu mutlak dari Direktur" - a command sent here is never just
+   * dropped for an agent who happens to be at their concurrency limit. If
+   * the agent is busy, the Task is still created and a TaskAssignment row
+   * is reserved for them (status TODO = queued), and `drainQueueForAgent`
+   * (called every time any agent's assignment completes - see
+   * `completeAssignment`) automatically activates it the moment a slot
+   * frees up, in the order the commands came in. Only a genuinely invalid
+   * agent id ends up in `failed`.
    */
   async broadcast(dto: BroadcastCommandDto) {
     const agents = await this.prisma.agent.findMany({
@@ -128,7 +228,8 @@ export class TasksService {
     if (agents.length === 0) throw new BadRequestException("Tidak ada agent yang valid dipilih");
 
     const title = dto.instruction.length > 90 ? `${dto.instruction.slice(0, 90)}…` : dto.instruction;
-    const dispatched: { agentId: string; agentName: string; taskId: string }[] = [];
+    const dueAt = dto.dueAt ? new Date(dto.dueAt) : undefined;
+    const dispatched: { agentId: string; agentName: string; taskId: string; queued: boolean }[] = [];
     const failed: { agentId: string; agentName: string; reason: string }[] = [];
 
     for (const agent of agents) {
@@ -138,7 +239,9 @@ export class TasksService {
             divisionId: agent.agentRole.divisionId,
             title,
             description: dto.instruction,
-            priority: 2,
+            priority: 1, // a direct director order always jumps the queue once a slot is free
+            projectId: dto.projectId,
+            dueAt,
           },
         });
         // A UI/UX brief: Analis has to weigh in before this counts as done
@@ -151,8 +254,16 @@ export class TasksService {
         if (agent.agentRole.name === ROLE_NAMES.UIUX_DESIGNER) {
           await this.wireUiUxDesignTask(task.id, agent.agentRole.divisionId);
         }
-        await this.assign(task.id, agent.id, "EXECUTOR");
-        dispatched.push({ agentId: agent.id, agentName: agent.displayName, taskId: task.id });
+        try {
+          await this.assign(task.id, agent.id, "EXECUTOR");
+          dispatched.push({ agentId: agent.id, agentName: agent.displayName, taskId: task.id, queued: false });
+        } catch (err) {
+          if (!(err instanceof BadRequestException)) throw err;
+          // Busy, not invalid - queue it instead of reporting a failure.
+          await this.prisma.taskAssignment.create({ data: { taskId: task.id, agentId: agent.id, role: "EXECUTOR" } });
+          await this.prisma.task.update({ where: { id: task.id }, data: { status: "TODO" } });
+          dispatched.push({ agentId: agent.id, agentName: agent.displayName, taskId: task.id, queued: true });
+        }
       } catch (err) {
         failed.push({ agentId: agent.id, agentName: agent.displayName, reason: err instanceof Error ? err.message : "unknown error" });
       }
@@ -244,7 +355,104 @@ export class TasksService {
     return { dispatched, skipped };
   }
 
-  /** QA failed -> bounce back to the executor, bounded by Task.maxRevisions (Catatan Penting). */
+  /**
+   * "Semua personel harus interaktif, jika tidak ada pekerjaan segera minta
+   * ke PM. Jika PM tidak ada, minta ke Chief of Staff. Chief of Staff tidak
+   * tahu mengerjakan apa, ajukan ke Direktur." - walks every ACTIVE
+   * division's roster once, and for any agent that is IDLE with no open
+   * assignment, routes a "need work" notice up the chain:
+   *   - a regular agent -> their division's PM (requiresApproval role)
+   *   - no PM in that division, or the idle agent IS the PM -> Chief of Staff
+   *   - Chief of Staff themself idle -> straight to the director, as a
+   *     DirectorQuestion (same inbox as "Pertanyaan")
+   * Idempotent per agent per calendar day (same marker-title pattern as
+   * auditDailyCheckIn) so a frequent cron tick never spams the same notice.
+   */
+  async checkIdleAgents() {
+    const startOfDay = new Date();
+    startOfDay.setUTCHours(0, 0, 0, 0);
+
+    const pusat = await this.prisma.division.findUnique({
+      where: { slug: "pusat" },
+      include: { agentRoles: { include: { agents: true } } },
+    });
+    const chiefRole = pusat?.agentRoles.find((r) => r.name.toLowerCase().includes("chief of staff"));
+    const chief = chiefRole?.agents[0] ?? null;
+
+    const divisions = await this.prisma.division.findMany({
+      where: { status: "ACTIVE" },
+      include: {
+        agentRoles: { include: { agents: { include: { assignments: { where: { completedAt: null } } } } } },
+      },
+    });
+
+    const notified: { agentId: string; agentName: string; routedTo: string }[] = [];
+    const skipped: { agentId: string; reason: string }[] = [];
+
+    for (const division of divisions) {
+      const pmRole = division.agentRoles.find((r) => r.requiresApproval && division.slug !== "pusat");
+      const pm = pmRole?.agents[0] ?? null;
+
+      for (const role of division.agentRoles) {
+        for (const agent of role.agents) {
+          if (agent.status !== "IDLE" || agent.assignments.length > 0) continue;
+
+          const marker = `[Idle] ${agent.displayName} menunggu pekerjaan`;
+          const already = await this.prisma.task.findFirst({ where: { title: marker, createdAt: { gte: startOfDay } } });
+          if (already) {
+            skipped.push({ agentId: agent.id, reason: "Sudah dilaporkan hari ini" });
+            continue;
+          }
+
+          const isChiefOfStaff = division.slug === "pusat" && chief?.id === agent.id;
+          try {
+            if (isChiefOfStaff) {
+              if (!chief) throw new Error("Chief of Staff tidak ditemukan");
+              await this.prisma.directorQuestion.create({
+                data: {
+                  agentId: chief.id,
+                  divisionId: division.id,
+                  question: `${chief.displayName} (Chief of Staff) sedang tidak ada pekerjaan. Ada arahan untuk hari ini?`,
+                },
+              });
+              notified.push({ agentId: agent.id, agentName: agent.displayName, routedTo: "Direktur" });
+              continue;
+            }
+
+            const isPm = pm?.id === agent.id;
+            const recipient = isPm ? chief : pm ?? chief;
+            if (!recipient) throw new Error("Tidak ada PM maupun Chief of Staff untuk dihubungi");
+
+            const task = await this.prisma.task.create({
+              data: {
+                divisionId: recipient.id === chief?.id ? (pusat?.id ?? division.id) : division.id,
+                title: marker,
+                description: `${agent.displayName} (${role.name}) di divisi ${division.name} sedang tidak ada pekerjaan. Tolong tugaskan sesuatu, atau beri tahu kalau memang belum ada yang bisa dikerjakan.`,
+                priority: 4,
+              },
+            });
+            await this.assign(task.id, recipient.id, "EXECUTOR");
+            notified.push({ agentId: agent.id, agentName: agent.displayName, routedTo: recipient.displayName });
+          } catch (err) {
+            skipped.push({ agentId: agent.id, reason: err instanceof Error ? err.message : "Gagal mengirim notifikasi" });
+          }
+        }
+      }
+    }
+
+    return { notified, skipped };
+  }
+
+  /**
+   * QA failed -> bounce back to the executor, bounded by Task.maxRevisions
+   * (Catatan Penting). The executor's slot was already freed in
+   * `recordResult` the moment they submitted, so this re-opens a fresh
+   * assignment for the SAME agent to redo the work - deliberately bypassing
+   * the concurrency check, since a revision is a continuation of work
+   * already promised, not a new request competing for a slot. The reviewer's
+   * assignment is left open (not completed) so the next round's QA still
+   * finds them attached to this task.
+   */
   async qaFailed(taskId: string) {
     const task = await this.prisma.task.findUniqueOrThrow({ where: { id: taskId } });
     if (task.revisionCount >= task.maxRevisions) {
@@ -260,6 +468,18 @@ export class TasksService {
       where: { id: taskId },
       data: { status: "RUNNING", revisionCount: { increment: 1 } },
     });
+    const lastExecutor = await this.prisma.taskAssignment.findFirst({
+      where: { taskId, role: "EXECUTOR" },
+      orderBy: { assignedAt: "desc" },
+    });
+    if (lastExecutor) {
+      await this.prisma.taskAssignment.create({ data: { taskId, agentId: lastExecutor.agentId, role: "EXECUTOR" } });
+      await this.kafka.publish(TOPICS.TASK_EVENTS, {
+        eventType: "task.assigned",
+        aggregateId: taskId,
+        payload: { agentId: lastExecutor.agentId, role: "EXECUTOR" },
+      });
+    }
     await this.kafka.publish(TOPICS.TASK_EVENTS, {
       eventType: "task.qa.failed",
       aggregateId: taskId,
@@ -272,6 +492,7 @@ export class TasksService {
     const task = await this.prisma.task.findUniqueOrThrow({ where: { id: taskId } });
     const nextStatus = task.requiresApproval ? "APPROVAL_PENDING" : "DONE";
     const updated = await this.prisma.task.update({ where: { id: taskId }, data: { status: nextStatus } });
+    await this.completeAssignment(taskId, "REVIEWER"); // reviewer's job on this task is done - free them up
     await this.kafka.publish(TOPICS.TASK_EVENTS, {
       eventType: task.requiresApproval ? "task.approval.requested" : "task.completed",
       aggregateId: taskId,

@@ -20,6 +20,11 @@ export class TasksController {
     return this.service.auditDailyCheckIn();
   }
 
+  /** "Semua personel harus interaktif" - idle-agent escalation chain, called periodically by the VPS's own crontab (see infra/). */
+  @Post("audit/idle-check-in") idleCheckIn() {
+    return this.service.checkIdleAgents();
+  }
+
   @Get("division/:divisionId/running") running(@Param("divisionId") divisionId: string) {
     return this.service.runningByDivision(divisionId);
   }

@@ -36,7 +36,12 @@ type Task = {
   requiresApproval: boolean;
   resultSummary?: string | null;
   updatedAt: string;
+  dueAt?: string | null;
+  project?: { id: string; name: string } | null;
+  assignments?: { role: "EXECUTOR" | "REVIEWER"; agent: { id: string; displayName: string } }[];
 };
+
+type Project = { id: string; name: string; description?: string | null };
 
 type Division = {
   id: string;
@@ -219,8 +224,39 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
   const [commandSelected, setCommandSelected] = useState<Set<string>>(new Set());
   const [commandText, setCommandText] = useState("");
   const [commandSending, setCommandSending] = useState(false);
-  const [commandResult, setCommandResult] = useState<{ dispatched: { agentId: string; agentName: string }[]; failed: { agentId: string; agentName: string; reason: string }[] } | null>(null);
+  const [commandResult, setCommandResult] = useState<{ dispatched: { agentId: string; agentName: string; queued?: boolean }[]; failed: { agentId: string; agentName: string; reason: string }[] } | null>(null);
   const commandResultTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // "Ada project yang sedang dikerjakan" + "PIC & deadline" - every command
+  // can optionally be tagged to a Project and given a deadline, which then
+  // shows up on the Task Board.
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [commandProjectId, setCommandProjectId] = useState("");
+  const [commandDueAt, setCommandDueAt] = useState("");
+  const [newProjectName, setNewProjectName] = useState("");
+
+  useEffect(() => {
+    api.listProjects().then(setProjects).catch(() => {});
+  }, []);
+
+  async function addProject() {
+    const name = newProjectName.trim();
+    if (!name) return;
+    try {
+      const project = await api.createProject(name);
+      setProjects((prev) => [project, ...prev]);
+      setCommandProjectId(project.id);
+      setNewProjectName("");
+    } catch {
+      // Not critical enough to block the command itself - the director can retry.
+    }
+  }
+
+  // Agent-detail modal: direct command to just this one person, plus the
+  // tasks actually assigned to them across every division.
+  const [modalCommandText, setModalCommandText] = useState("");
+  const [modalCommandSending, setModalCommandSending] = useState(false);
+  const [modalCommandResult, setModalCommandResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   function toggleCommandAgent(id: string) {
     setCommandSelected((prev) => {
@@ -241,6 +277,44 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
     [divisions]
   );
 
+  // "Modal agent menampilkan tugas-tugasnya juga, karena 1 agent bisa lebih
+  // dari 1 tugas" - scan every division's tasks for one where this agent
+  // shows up in the assignment history (either role), newest first.
+  const selectedAgentTasks = useMemo(() => {
+    if (!selected) return [];
+    return divisions
+      .flatMap((d) => (d.tasks ?? []).map((t) => ({ ...t, divisionName: d.name })))
+      .filter((t) => (t.assignments ?? []).some((a) => a.agent.id === selected.id))
+      .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+  }, [divisions, selected]);
+
+  async function sendModalCommand() {
+    if (!selected) return;
+    const instruction = modalCommandText.trim();
+    if (!instruction || modalCommandSending) return;
+    setModalCommandSending(true);
+    setModalCommandResult(null);
+    try {
+      const result = await api.broadcastCommand({ agentIds: [selected.id], instruction });
+      const entry = result.dispatched[0];
+      if (entry) {
+        setModalCommandResult({
+          ok: true,
+          message: entry.queued ? `${selected.displayName} sedang sibuk - perintah diantrekan.` : `Terkirim ke ${selected.displayName}.`,
+        });
+      } else {
+        const fail = result.failed[0];
+        setModalCommandResult({ ok: false, message: fail?.reason ?? "Gagal mengirim perintah." });
+      }
+      setModalCommandText("");
+      api.listDivisions().then(setDivisions).catch(() => {});
+    } catch (e) {
+      setModalCommandResult({ ok: false, message: e instanceof Error ? e.message : "Gagal mengirim perintah." });
+    } finally {
+      setModalCommandSending(false);
+    }
+  }
+
   async function sendCommand() {
     const instruction = commandText.trim();
     if (!instruction || commandSending) return;
@@ -249,8 +323,15 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
     if (commandResultTimer.current) clearTimeout(commandResultTimer.current);
     try {
       if (agentIds.length > 0) {
-        // Picked someone: dispatch straight to them, bypassing triage entirely.
-        const result = await api.broadcastCommand(agentIds, instruction);
+        // Picked someone: dispatch straight to them, bypassing triage
+        // entirely. Perintah Direktur mutlak - if an agent is busy, the API
+        // queues it for them instead of dropping it (see `queued` below).
+        const result = await api.broadcastCommand({
+          agentIds,
+          instruction,
+          projectId: commandProjectId || undefined,
+          dueAt: commandDueAt ? new Date(commandDueAt).toISOString() : undefined,
+        });
         setCommandResult(result);
       } else {
         // Nobody picked: it's a free-standing order, not aimed at anyone in
@@ -258,10 +339,17 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
         // to "pusat", and let the existing auto-triage (task.created ->
         // Chief of Staff's AI call) decide who actually ends up at their
         // desk working on it.
-        await api.createTask({ divisionSlug: "pusat", title: instruction, description: instruction });
+        await api.createTask({
+          divisionSlug: "pusat",
+          title: instruction,
+          description: instruction,
+          projectId: commandProjectId || undefined,
+          dueAt: commandDueAt ? new Date(commandDueAt).toISOString() : undefined,
+        });
         setCommandResult({ dispatched: [{ agentId: "pusat", agentName: "Chief of Staff (ditriase otomatis)" }], failed: [] });
       }
       setCommandText("");
+      setCommandDueAt("");
       setCommandSelected(new Set());
       // Poll right away so the office visibly reacts instead of waiting for
       // the next 4s tick.
@@ -487,6 +575,37 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
                     </div>
                   ))}
                 </div>
+                <div className={styles.miniRow}>
+                  <select className={styles.miniSelect} value={commandProjectId} onChange={(e) => setCommandProjectId(e.target.value)}>
+                    <option value="">Tanpa project</option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    className={styles.miniInput}
+                    placeholder="Project baru…"
+                    value={newProjectName}
+                    onChange={(e) => setNewProjectName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") addProject();
+                    }}
+                  />
+                  <button type="button" className={styles.miniAddButton} onClick={addProject} disabled={!newProjectName.trim()}>
+                    + Buat
+                  </button>
+                </div>
+                <div className={styles.miniRow}>
+                  <input
+                    type="datetime-local"
+                    className={styles.miniInput}
+                    value={commandDueAt}
+                    onChange={(e) => setCommandDueAt(e.target.value)}
+                    title="Deadline (opsional)"
+                  />
+                </div>
                 <textarea
                   className={styles.commandTextarea}
                   placeholder="Contoh: Buat ringkasan progres minggu ini dan kirim ke saya..."
@@ -518,7 +637,9 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
                         <span>
                           {d.agentId === "pusat"
                             ? `Terkirim ke ${d.agentName} - sedang menentukan siapa yang paling cocok`
-                            : `${d.agentName} mulai mengerjakan`}
+                            : d.queued
+                              ? `${d.agentName} sedang sibuk - perintah diantrekan, akan dikerjakan begitu selesai`
+                              : `${d.agentName} mulai mengerjakan`}
                         </span>
                       </div>
                     ))}
@@ -602,8 +723,15 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
       </div>
 
       {selected && (
-        <div className={styles.overlay} onClick={() => setSelected(null)}>
-          <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+        <div
+          className={styles.overlay}
+          onClick={() => {
+            setSelected(null);
+            setModalCommandText("");
+            setModalCommandResult(null);
+          }}
+        >
+          <div className={`${styles.modal} ${styles.modalWide}`} onClick={(e) => e.stopPropagation()}>
             <p className={styles.modalName}>{selected.displayName}</p>
             <p className={styles.modalRole}>
               {selected.role} · {selected.division}
@@ -622,7 +750,67 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
               <span className={styles.statLabel}>Wajib approval</span>
               <span className={styles.statValue}>{selected.requiresApproval ? "Ya" : "Tidak"}</span>
             </div>
-            <button type="button" className={styles.modalClose} onClick={() => setSelected(null)}>
+
+            <p className={styles.modalSectionTitle}>Tugas {selected.displayName} ({selectedAgentTasks.length})</p>
+            <div className={styles.taskList}>
+              {selectedAgentTasks.length === 0 && <p className={styles.modalTaskEmpty}>Belum ada tugas yang tercatat.</p>}
+              {selectedAgentTasks.map((t) => (
+                <div key={t.id} className={styles.taskRow}>
+                  <div className={styles.taskRowTop}>
+                    <span className={styles.taskTitle}>{t.title}</span>
+                    <span className={styles.taskStatus} style={{ color: TASK_STATUS_COLOR[t.status] ?? "#7f91a3" }}>
+                      {TASK_STATUS_LABEL[t.status] ?? t.status}
+                    </span>
+                  </div>
+                  <div className={styles.taskRowMeta}>
+                    <span>{t.divisionName}</span>
+                    {t.dueAt && <span>Deadline {new Date(t.dueAt).toLocaleString("id-ID")}</span>}
+                    {t.project?.name && <span>Project: {t.project.name}</span>}
+                  </div>
+                  {t.resultSummary && <p className={styles.taskSummary}>{t.resultSummary}</p>}
+                </div>
+              ))}
+            </div>
+
+            <p className={styles.modalSectionTitle}>Perintah langsung ke {selected.displayName}</p>
+            <div className={styles.modalCommandRow}>
+              <input
+                className={styles.modalCommandInput}
+                placeholder="Ketik perintah untuk agent ini saja…"
+                value={modalCommandText}
+                onChange={(e) => setModalCommandText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") sendModalCommand();
+                }}
+              />
+              <button
+                type="button"
+                className={styles.modalCommandSend}
+                disabled={!modalCommandText.trim() || modalCommandSending}
+                onClick={sendModalCommand}
+              >
+                {modalCommandSending ? "Mengirim…" : "Kirim"}
+              </button>
+            </div>
+            {modalCommandResult && (
+              <p
+                className={`${styles.modalCommandFeedback} ${
+                  modalCommandResult.ok ? styles.modalCommandFeedbackOk : styles.modalCommandFeedbackFail
+                }`}
+              >
+                {modalCommandResult.message}
+              </p>
+            )}
+
+            <button
+              type="button"
+              className={styles.modalClose}
+              onClick={() => {
+                setSelected(null);
+                setModalCommandText("");
+                setModalCommandResult(null);
+              }}
+            >
               Tutup
             </button>
           </div>

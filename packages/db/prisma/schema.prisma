@@ -159,6 +159,8 @@ model Task {
   parentTaskId       String?     // set -> this is a subtask running in parallel with siblings
   parentTask         Task?       @relation("TaskSubtasks", fields: [parentTaskId], references: [id], onDelete: Cascade)
   subtasks           Task[]      @relation("TaskSubtasks")
+  projectId          String?     // "ada project yang sedang dikerjakan" - groups tasks across divisions on the Task Board
+  project            Project?    @relation(fields: [projectId], references: [id], onDelete: SetNull)
 
   title              String
   description        String?     @db.Text
@@ -167,6 +169,7 @@ model Task {
   requiresApproval   Boolean     @default(false) // from the division's "wajib naik" rules
   revisionCount      Int         @default(0)     // QA <-> Spesialis loop counter
   maxRevisions       Int         @default(3)     // hard stop for the loop (Catatan Penting di sheet)
+  dueAt              DateTime?   // deadline shown on the Task Board card, set by whoever creates the task
 
   // Filled in by the worker (apps/worker) once an executor agent finishes.
   resultSummary      String?     @db.Text  // short human-readable summary, fits in the UI directly
@@ -182,6 +185,31 @@ model Task {
 
   @@index([divisionId, status])
   @@index([parentTaskId])
+  @@index([projectId])
+}
+
+enum ProjectStatus {
+  ACTIVE
+  DONE
+  ARCHIVED
+}
+
+// A director-visible initiative that groups tasks across divisions - "ada
+// project yang sedang dikerjakan" so the Task Board shows real work in
+// motion instead of tasks just sitting isolated in their own division
+// column. Purely a grouping label: deleting/archiving a Project never
+// touches its tasks (projectId just goes back to null).
+model Project {
+  id          String        @id @default(cuid())
+  name        String
+  description String?       @db.Text
+  status      ProjectStatus @default(ACTIVE)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  tasks       Task[]
+
+  @@index([status])
 }
 
 enum AssignmentRole {

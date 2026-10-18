@@ -778,3 +778,124 @@
   color: #7f91a3;
   line-height: 1.4;
 }
+
+.taskRowMeta {
+  display: flex;
+  gap: 10px;
+  margin-top: 3px;
+  font-size: 10.5px;
+  color: #5c7085;
+}
+
+/* Project/deadline row above the command textarea - "ada project yang
+   sedang dikerjakan" + "PIC & deadline" from the director's revision. */
+.miniRow {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.miniSelect,
+.miniInput {
+  flex: 1;
+  min-width: 0;
+  background: #0b141f;
+  border: 1px solid #243545;
+  border-radius: 8px;
+  padding: 7px 9px;
+  color: #eef3f7;
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.miniSelect:focus,
+.miniInput:focus {
+  outline: none;
+  border-color: #5fc9b8;
+}
+
+.miniAddButton {
+  flex: none;
+  padding: 0 11px;
+  border-radius: 8px;
+  border: 1px solid #243545;
+  background: none;
+  color: #9fe6d8;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.miniAddButton:hover {
+  background: #152636;
+}
+
+.modalSectionTitle {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #7f91a3;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 16px 0 6px;
+}
+
+.modalTaskEmpty {
+  color: #5c7085;
+  font-size: 12px;
+  margin: 4px 0;
+}
+
+.modalCommandRow {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.modalCommandInput {
+  flex: 1;
+  min-width: 0;
+  background: #0b141f;
+  border: 1px solid #243545;
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: #eef3f7;
+  font-size: 12.5px;
+  font-family: inherit;
+}
+
+.modalCommandInput:focus {
+  outline: none;
+  border-color: #5fc9b8;
+}
+
+.modalCommandSend {
+  flex: none;
+  padding: 0 14px;
+  border-radius: 8px;
+  border: none;
+  background: linear-gradient(135deg, #5fc9b8, #3d9c8f);
+  color: #06201a;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.modalCommandSend:disabled {
+  background: #233140;
+  color: #5c6c7c;
+  cursor: default;
+}
+
+.modalCommandFeedback {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.modalCommandFeedbackOk {
+  color: #5fc9b8;
+}
+
+.modalCommandFeedbackFail {
+  color: #d6665b;
+}

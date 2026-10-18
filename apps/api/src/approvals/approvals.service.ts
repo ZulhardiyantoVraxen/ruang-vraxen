@@ -17,7 +17,7 @@ export class ApprovalsService {
   pending() {
     return this.prisma.approval.findMany({
       where: { status: "PENDING" },
-      include: { task: { include: { division: true } } },
+      include: { task: { include: { division: true, project: true } } },
       orderBy: { requestedAt: "asc" },
     });
   }
