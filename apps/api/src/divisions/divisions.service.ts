@@ -42,7 +42,20 @@ export class DivisionsService {
       where: { slug },
       include: {
         agentRoles: { include: { agents: true, modelClass: true } },
-        tasks: { where: { parentTaskId: null }, orderBy: { createdAt: "desc" } },
+        tasks: {
+          where: { parentTaskId: null },
+          orderBy: { createdAt: "desc" },
+          // Full assignment history per task - who actually worked it and
+          // when - so a page like "PIC Chief of Staff" can show a real
+          // riwayat (status + waktu + siapa yang membalas), not just the
+          // bare current status.
+          include: {
+            assignments: {
+              include: { agent: { select: { displayName: true, agentRole: { select: { name: true } } } } },
+              orderBy: { assignedAt: "asc" },
+            },
+          },
+        },
       },
     });
     if (!division) throw new NotFoundException(`Division "${slug}" not found`);

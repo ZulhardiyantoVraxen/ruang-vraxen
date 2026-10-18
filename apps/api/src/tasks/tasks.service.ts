@@ -3,6 +3,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { KafkaService } from "../kafka/kafka.service";
 import { TOPICS } from "@platform/shared";
 import { BroadcastCommandDto, CreateTaskDto, TriageTaskDto } from "./dto";
+import { ROLE_NAMES } from "../common/role-names";
 
 /**
  * One division running several jobs at once = several Task rows with the
@@ -71,6 +72,11 @@ export class TasksService {
       where: { id: taskId },
       data: {
         divisionId: division.id,
+        // forceFinal (set only when auto-triage itself failed) overrides
+        // whatever "wajib persetujuan" box was checked when this was filed -
+        // a director's order doesn't wait on a second approval loop just
+        // because the AI classifier couldn't pick a division for it.
+        requiresApproval: dto.forceFinal ? false : undefined,
         description: dto.reasoning
           ? [task.description, `[Triase Chief of Staff] ${dto.reasoning}`].filter(Boolean).join("\n\n")
           : task.description,
@@ -135,6 +141,16 @@ export class TasksService {
             priority: 2,
           },
         });
+        // A UI/UX brief: Analis has to weigh in before this counts as done
+        // (the "koordinasi dengan Analis" from the director's brief) and the
+        // result always rolls up to the director's own Approval queue -
+        // never bypassable via the task-level "wajib persetujuan" box, since
+        // this hand-off chain depends on it. Both are wired BEFORE the
+        // executor is assigned (which is what actually fires the worker),
+        // so the QA step is guaranteed to see the reviewer already in place.
+        if (agent.agentRole.name === ROLE_NAMES.UIUX_DESIGNER) {
+          await this.wireUiUxDesignTask(task.id, agent.agentRole.divisionId);
+        }
         await this.assign(task.id, agent.id, "EXECUTOR");
         dispatched.push({ agentId: agent.id, agentName: agent.displayName, taskId: task.id });
       } catch (err) {
@@ -142,6 +158,21 @@ export class TasksService {
       }
     }
     return { dispatched, failed };
+  }
+
+  private async wireUiUxDesignTask(taskId: string, divisionId: string) {
+    await this.prisma.task.update({ where: { id: taskId }, data: { requiresApproval: true } });
+    const analyst = await this.prisma.agent.findFirst({
+      where: { agentRole: { divisionId, name: ROLE_NAMES.ANALYST } },
+    });
+    if (!analyst) return; // no Analis seeded in this division - design still ships, just without a second opinion
+    try {
+      await this.assign(taskId, analyst.id, "REVIEWER");
+    } catch (err) {
+      // Analis already at its concurrency limit - don't let that block the
+      // design work itself, just note it got no review pass.
+      console.error(`[tasks] could not assign Analis reviewer for design task ${taskId}:`, err);
+    }
   }
 
   /** QA failed -> bounce back to the executor, bounded by Task.maxRevisions (Catatan Penting). */

@@ -32,6 +32,6 @@ export const apiClient = {
     tokensOut: number;
   }) => post("/usage", params),
   setAgentStatus: (agentId: string, status: string) => post(`/agents/${agentId}/status`, { status }, "PATCH"),
-  triageTask: (taskId: string, params: { divisionSlug: string; agentId: string; reasoning?: string }) =>
+  triageTask: (taskId: string, params: { divisionSlug: string; agentId: string; reasoning?: string; forceFinal?: boolean }) =>
     post(`/tasks/${taskId}/triage`, params),
 };

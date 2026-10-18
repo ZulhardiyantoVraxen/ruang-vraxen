@@ -99,6 +99,7 @@ async function seedDefaultOrg() {
       roles: [
         { name: "PM Software", tier: ModelTier.ATAS, responsibilities: "Titik keputusan & laporan approval", requiresApproval: true, agent: "Andi Wijaya" },
         { name: "Analis", tier: ModelTier.AHLI, responsibilities: "Analisis kebutuhan memengaruhi seluruh pengerjaan", agent: "Sari Kusuma" },
+        { name: "Desainer UI/UX", tier: ModelTier.AHLI, responsibilities: "Desain antarmuka & pengalaman pengguna - koordinasi dengan PM Software & Analis; wajib persetujuan Anda sebelum lanjut ke Developer", agent: "Dinda Permatasari" },
         { name: "Developer", tier: ModelTier.AHLI, responsibilities: "Menulis kode", agent: "Fajar Ramadhan" },
         { name: "QA / Reviewer", tier: ModelTier.AHLI, responsibilities: "Pemeriksaan teliti; batasi iterasi revisi", agent: "Lina Marlina" },
         { name: "DevOps", tier: ModelTier.AHLI, responsibilities: "Konfigurasi server & deploy, kesalahan mahal", agent: "Doni Setiawan" },

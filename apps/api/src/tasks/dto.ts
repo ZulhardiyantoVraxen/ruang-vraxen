@@ -14,6 +14,15 @@ export class TriageTaskDto {
   @IsString() divisionSlug!: string;
   @IsString() agentId!: string;
   @IsOptional() @IsString() reasoning?: string;
+  /**
+   * Set when auto-triage itself failed and Chief of Staff is executing the
+   * directive directly instead. Every task that reaches triage originated
+   * from the director's own "PIC Chief of Staff" inbox, so a failure to
+   * classify it is never a reason to make the director wait on a second
+   * approval loop on top of their own order - this drops Task.requiresApproval
+   * regardless of what was checked when the order was sent.
+   */
+  @IsOptional() @IsBoolean() forceFinal?: boolean;
 }
 
 /**

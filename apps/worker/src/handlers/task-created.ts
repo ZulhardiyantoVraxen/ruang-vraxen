@@ -64,6 +64,12 @@ export async function handleTaskCreated(taskId: string, payload: TaskCreatedPayl
   await apiClient.setAgentStatus(chief.id, "REVIEWING");
 
   let decision: { divisionSlug: string; reasoning: string };
+  // Set only on the catch-path below: every task that reaches this handler
+  // came from the director's own "PIC Chief of Staff" inbox, so a failed
+  // classification is never a reason to park it behind a second approval
+  // loop - the director's order is absolute even when the AI can't tell
+  // which division it belongs to.
+  let forceFinal = false;
   try {
     const route = resolveModel(chiefRole.modelClass, chief.modelVariant);
     const prompt = chiefOfStaffTriagePrompt({
@@ -105,7 +111,11 @@ export async function handleTaskCreated(taskId: string, payload: TaskCreatedPayl
     // crashing the consumer loop, same philosophy as the QA verdict parse
     // in task-assigned.ts.
     console.error(`[worker] triage failed for task ${taskId}, keeping with Chief of Staff:`, err);
-    decision = { divisionSlug: "pusat", reasoning: "Triase otomatis gagal - ditinjau manual oleh Chief of Staff." };
+    decision = {
+      divisionSlug: "pusat",
+      reasoning: "Triase otomatis gagal - dieksekusi langsung oleh Chief of Staff atas perintah direktur (final, tanpa approval tambahan).",
+    };
+    forceFinal = true;
   }
 
   const targetDivision = divisions.find((d) => d.slug === decision.divisionSlug) ?? divisions.find((d) => d.slug === "pusat");
@@ -116,6 +126,7 @@ export async function handleTaskCreated(taskId: string, payload: TaskCreatedPayl
     divisionSlug: targetDivision?.slug ?? "pusat",
     agentId: targetAgent.id,
     reasoning: decision.reasoning,
+    forceFinal,
   });
 
   await apiClient.setAgentStatus(chief.id, "IDLE");

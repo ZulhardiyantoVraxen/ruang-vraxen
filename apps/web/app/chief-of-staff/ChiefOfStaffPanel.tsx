@@ -2,9 +2,17 @@
 
 import { useMemo, useState } from "react";
 import { api } from "@/lib/api";
+import styles from "./chiefOfStaff.module.css";
 
 type Agent = { id: string; displayName: string; status: string };
 type AgentRole = { id: string; name: string; requiresApproval: boolean; agents: Agent[] };
+type Assignment = {
+  id: string;
+  role: "EXECUTOR" | "REVIEWER";
+  assignedAt: string;
+  completedAt: string | null;
+  agent: { displayName: string; agentRole: { name: string } };
+};
 type Task = {
   id: string;
   title: string;
@@ -15,6 +23,7 @@ type Task = {
   resultSummary?: string | null;
   updatedAt: string;
   createdAt: string;
+  assignments?: Assignment[];
 };
 type Division = { id: string; slug: string; name: string; agentRoles: AgentRole[]; tasks?: Task[] };
 
@@ -43,6 +52,24 @@ const STATUS_COLOR: Record<string, string> = {
   DONE: "#5fc9b8",
   REJECTED: "#e06c5b",
 };
+
+function formatTime(iso: string) {
+  try {
+    return new Intl.DateTimeFormat("id-ID", {
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(iso));
+  } catch {
+    return iso;
+  }
+}
+
+function initials(name: string) {
+  const parts = name.trim().split(/\s+/);
+  return ((parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "")).toUpperCase() || "?";
+}
 
 export default function ChiefOfStaffPanel({ pusat }: { pusat: Division | null }) {
   const [title, setTitle] = useState("");
@@ -83,43 +110,51 @@ export default function ChiefOfStaffPanel({ pusat }: { pusat: Division | null })
   }
 
   return (
-    <div style={{ maxWidth: 680 }}>
-      <h1>PIC Chief of Staff</h1>
-      <p style={{ color: "#94a3b8" }}>
-        Beri pekerjaan langsung ke Chief of Staff di sini - bukan ke divisi tertentu. Chief of Staff yang akan
-        memilah, meneruskan ke PM divisi terkait, dan menggabungkan laporan yang butuh persetujuan Anda jadi satu
-        antrean di halaman Approval.
-      </p>
-      {chiefOfStaff && (
-        <p style={{ fontSize: 13, color: "#64748b" }}>
-          Chief of Staff saat ini: <strong style={{ color: "#e2e8f0" }}>{chiefOfStaff.displayName}</strong>
-        </p>
-      )}
-      {!pusat && (
-        <p style={{ color: "#e06c5b" }}>
-          Tidak bisa memuat divisi Pusat / Chief of Staff. Coba muat ulang halaman.
-        </p>
-      )}
+    <div className={styles.page}>
+      <div className={styles.header}>
+        <div className={styles.headerText}>
+          <h1>PIC Chief of Staff</h1>
+          <p>
+            Beri pekerjaan langsung ke Chief of Staff di sini - bukan ke divisi tertentu. Chief of Staff yang akan
+            memilah, meneruskan ke PM divisi terkait, dan menggabungkan laporan yang butuh persetujuan Anda jadi satu
+            antrean di halaman Approval.
+          </p>
+        </div>
+        {chiefOfStaff && (
+          <div className={styles.chiefCard}>
+            <div className={styles.chiefAvatar}>{initials(chiefOfStaff.displayName)}</div>
+            <div className={styles.chiefMeta}>
+              <span className={styles.chiefLabel}>Chief of Staff saat ini</span>
+              <span className={styles.chiefName}>{chiefOfStaff.displayName}</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {!pusat && <p className={styles.error}>Tidak bisa memuat divisi Pusat / Chief of Staff. Coba muat ulang halaman.</p>}
 
       {pusat && (
-        <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 10 }}>
-          <input
-            placeholder="Judul pekerjaan - contoh: Review rencana ekspansi Q1"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            style={{ padding: 8 }}
-          />
-          <textarea
-            placeholder="Detail / konteks (opsional)"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            rows={4}
-            style={{ padding: 8, width: "100%" }}
-          />
-          <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
+        <div className={styles.card}>
+          <p className={styles.cardTitle}>Beri pekerjaan baru</p>
+          <div className={styles.fieldStack}>
+            <input
+              className={styles.field}
+              placeholder="Judul pekerjaan - contoh: Review rencana ekspansi Q1"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+            />
+            <textarea
+              className={styles.field}
+              placeholder="Detail / konteks (opsional)"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={4}
+            />
+          </div>
+          <div className={styles.row}>
+            <label className={styles.priorityLabel}>
               Prioritas
-              <select value={priority} onChange={(e) => setPriority(Number(e.target.value))}>
+              <select className={styles.prioritySelect} value={priority} onChange={(e) => setPriority(Number(e.target.value))}>
                 <option value={1}>1 - Tertinggi</option>
                 <option value={2}>2</option>
                 <option value={3}>3 - Normal</option>
@@ -127,40 +162,62 @@ export default function ChiefOfStaffPanel({ pusat }: { pusat: Division | null })
                 <option value={5}>5 - Terendah</option>
               </select>
             </label>
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
-              <input type="checkbox" checked={requiresApproval} onChange={(e) => setRequiresApproval(e.target.checked)} />
+            <label className={styles.toggle} onClick={() => setRequiresApproval((v) => !v)}>
+              <span className={`${styles.toggleTrack} ${requiresApproval ? styles.toggleTrackOn : ""}`}>
+                <span className={`${styles.toggleKnob} ${requiresApproval ? styles.toggleKnobOn : ""}`} />
+              </span>
               Hasil akhir wajib persetujuan saya
             </label>
           </div>
-          {error && <p style={{ color: "#e06c5b", fontSize: 13 }}>{error}</p>}
-          <div>
-            <button disabled={busy || !title.trim()} onClick={submit}>
+          {error && <p className={styles.error}>{error}</p>}
+          <div className={styles.submitRow}>
+            <button className={styles.submitButton} disabled={busy || !title.trim()} onClick={submit}>
               {busy ? "Mengirim..." : "Kirim ke Chief of Staff"}
             </button>
           </div>
         </div>
       )}
 
-      <h3 style={{ marginTop: 32 }}>Riwayat pekerjaan yang diberikan</h3>
-      <ul style={{ listStyle: "none", padding: 0 }}>
-        {tasks.map((t) => (
-          <li key={t.id} style={{ borderTop: "1px solid #1c2b3a", padding: "10px 0" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-              <strong>{t.title}</strong>
-              <span style={{ fontSize: 12, fontWeight: 600, color: STATUS_COLOR[t.status] ?? "#94a3b8", whiteSpace: "nowrap" }}>
-                {STATUS_LABEL[t.status] ?? t.status}
-              </span>
+      <div className={styles.historyHead}>
+        <h2>Riwayat pekerjaan yang diberikan</h2>
+        <span className={styles.historyCount}>{tasks.length}</span>
+      </div>
+
+      {tasks.length === 0 && <p className={styles.empty}>Belum ada pekerjaan yang diberikan.</p>}
+
+      <div className={styles.timeline}>
+        {tasks.map((t) => {
+          const color = STATUS_COLOR[t.status] ?? "#94a3b8";
+          const executor = t.assignments?.filter((a) => a.role === "EXECUTOR").slice(-1)[0];
+          const repliedBy = executor ? `${executor.agent.displayName} · ${executor.agent.agentRole.name}` : "Chief of Staff";
+          return (
+            <div key={t.id} className={styles.entry}>
+              <div className={styles.entryRail}>
+                <div className={styles.entryDot} style={{ background: color }} />
+              </div>
+              <div className={styles.entryBody}>
+                <div className={styles.entryTop}>
+                  <p className={styles.entryTitle}>{t.title}</p>
+                  <span className={styles.pill} style={{ color, background: `${color}22`, border: `1px solid ${color}55` }}>
+                    {STATUS_LABEL[t.status] ?? t.status}
+                  </span>
+                </div>
+                <p className={styles.entryTime}>
+                  Dikirim {formatTime(t.createdAt)}
+                  {t.updatedAt !== t.createdAt && ` · Diperbarui ${formatTime(t.updatedAt)}`}
+                </p>
+                {t.description && <p className={styles.entryDesc}>{t.description}</p>}
+                {t.resultSummary && (
+                  <div className={styles.reply}>
+                    <p className={styles.replyFrom}>Balasan dari {repliedBy}</p>
+                    <p className={styles.replyText}>{t.resultSummary}</p>
+                  </div>
+                )}
+              </div>
             </div>
-            {t.description && <p style={{ fontSize: 13, color: "#94a3b8", margin: "4px 0 0" }}>{t.description}</p>}
-            {t.resultSummary && (
-              <p style={{ fontSize: 13, color: "#c3cdd7", margin: "4px 0 0" }}>
-                <em>Hasil:</em> {t.resultSummary}
-              </p>
-            )}
-          </li>
-        ))}
-        {tasks.length === 0 && <li style={{ color: "#64748b", padding: "10px 0" }}>Belum ada pekerjaan yang diberikan.</li>}
-      </ul>
+          );
+        })}
+      </div>
     </div>
   );
 }
