@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type PointerEvent, type WheelEven
 import dynamic from "next/dynamic";
 import styles from "./office.module.css";
 import { api } from "@/lib/api";
+import ExpandableText from "./components/ExpandableText";
 
 // The 3D scene pulls in three.js + @react-three/fiber, which is a sizeable
 // chunk of JS and needs a WebGL canvas - loaded only when the person
@@ -883,7 +884,13 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
                     {t.dueAt && <span>Deadline {new Date(t.dueAt).toLocaleString("id-ID")}</span>}
                     {t.project?.name && <span>Project: {t.project.name}</span>}
                   </div>
-                  {t.resultSummary && <p className={styles.taskSummary}>{t.resultSummary}</p>}
+                  {t.resultSummary && (
+                    <ExpandableText
+                      text={t.resultSummary}
+                      className={styles.taskSummary}
+                      onLoadFull={() => api.taskFullText(t.id)}
+                    />
+                  )}
                 </div>
               ))}
             </div>
@@ -903,7 +910,7 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
                   key={m.id}
                   className={`${styles.modalChatBubble} ${m.role === "DIRECTOR" ? styles.modalChatBubbleMe : styles.modalChatBubbleAgent}`}
                 >
-                  {m.content}
+                  <ExpandableText text={m.content} lines={6} style={{ margin: 0 }} />
                 </div>
               ))}
             </div>
@@ -971,7 +978,13 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
                       {TASK_STATUS_LABEL[t.status] ?? t.status}
                     </span>
                   </div>
-                  {t.resultSummary && <p className={styles.taskSummary}>{t.resultSummary}</p>}
+                  {t.resultSummary && (
+                    <ExpandableText
+                      text={t.resultSummary}
+                      className={styles.taskSummary}
+                      onLoadFull={() => api.taskFullText(t.id)}
+                    />
+                  )}
                 </div>
               ))}
             </div>

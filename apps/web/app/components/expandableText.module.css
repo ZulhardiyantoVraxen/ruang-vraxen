@@ -1,0 +1,20 @@
+.toggle {
+  margin-top: 4px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #5fc9b8;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.toggle:hover {
+  text-decoration: underline;
+}
+
+.toggle:disabled {
+  cursor: default;
+  opacity: 0.6;
+  text-decoration: none;
+}

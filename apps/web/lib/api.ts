@@ -77,6 +77,28 @@ export const api = {
    */
   taskPdfHref: (taskId: string) =>
     `${typeof window === "undefined" ? "" : process.env.NEXT_PUBLIC_API_URL ?? "/api"}/tasks/${taskId}/pdf`,
+  /** "Baca semua" on a truncated Task.resultSummary - the full .md the worker stored, read lazily on expand. */
+  taskFullText: async (taskId: string) => {
+    const res = await fetch(`${BASE}/tasks/${taskId}/full-text`, { cache: "no-store" });
+    if (!res.ok) throw new Error(`API /tasks/${taskId}/full-text failed: ${res.status}`);
+    return res.text();
+  },
+  /** "Arsip" - every finished task plus where its output actually lives (GitHub repo / Drive / PDF). */
+  archive: () =>
+    request<
+      {
+        id: string;
+        title: string;
+        status: string;
+        division: { name: string; slug: string } | null;
+        project: { name: string } | null;
+        updatedAt: string;
+        resultSummary: string | null;
+        githubUrl: string | null;
+        driveUrl: string | null;
+        pdfAvailable: boolean;
+      }[]
+    >("/tasks/archive"),
   /** The director's queue of questions raised by PM/decision-point agents mid-task. */
   openQuestions: () => request<any[]>("/questions/open"),
   answerQuestion: (id: string, answer: string) =>

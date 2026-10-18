@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
+import ExpandableText from "../components/ExpandableText";
 import styles from "./chiefOfStaff.module.css";
 
 type Agent = { id: string; displayName: string; status: string };
@@ -240,11 +241,15 @@ export default function ChiefOfStaffPanel({ pusat }: { pusat: Division | null })
                   Dikirim {formatTime(t.createdAt)}
                   {t.updatedAt !== t.createdAt && ` · Diperbarui ${formatTime(t.updatedAt)}`}
                 </p>
-                {t.description && <p className={styles.entryDesc}>{t.description}</p>}
+                {t.description && <ExpandableText text={t.description} className={styles.entryDesc} />}
                 {t.resultSummary && (
                   <div className={styles.reply}>
                     <p className={styles.replyFrom}>Balasan dari {repliedBy}</p>
-                    <p className={styles.replyText}>{t.resultSummary}</p>
+                    <ExpandableText
+                      text={t.resultSummary}
+                      className={styles.replyText}
+                      onLoadFull={() => api.taskFullText(t.id)}
+                    />
                   </div>
                 )}
               </div>

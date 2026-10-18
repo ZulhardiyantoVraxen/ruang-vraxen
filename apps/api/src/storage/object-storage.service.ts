@@ -23,4 +23,15 @@ export class ObjectStorageService {
   getObjectBuffer(key: string) {
     return this.client.getObjectBuffer(key);
   }
+
+  /** Reads a small JSON marker object (see apps/worker's github-output.json), or null if it doesn't exist. */
+  async getJson<T>(key: string): Promise<T | null> {
+    if (!(await this.client.exists(key))) return null;
+    try {
+      const buffer = await this.client.getObjectBuffer(key);
+      return JSON.parse(buffer.toString("utf-8")) as T;
+    } catch {
+      return null;
+    }
+  }
 }

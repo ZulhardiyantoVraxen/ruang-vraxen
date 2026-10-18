@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import styles from "./taskBoard.module.css";
 import { api } from "../../lib/api";
+import ExpandableText from "../components/ExpandableText";
 
 type Task = {
   id: string;
@@ -120,7 +121,14 @@ export default function TaskBoard({
                     {t.projectName && <p className={styles.cardProject}>{t.projectName}</p>}
                     <p className={styles.cardDivision}>{t.divisionName}</p>
                     <p className={styles.cardTitle}>{t.title}</p>
-                    {t.resultSummary && <p className={styles.cardSummary}>{t.resultSummary}</p>}
+                    {t.resultSummary && (
+                      <ExpandableText
+                        text={t.resultSummary}
+                        lines={2}
+                        className={styles.cardSummary}
+                        onLoadFull={() => api.taskFullText(t.id)}
+                      />
+                    )}
                     <div className={styles.cardMeta}>
                       <span className={styles.cardPriority}>P{t.priority}</span>
                       {t.picName && <span className={styles.cardPic}>PIC: {t.picName}</span>}

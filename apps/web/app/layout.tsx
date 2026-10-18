@@ -69,6 +69,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <a href="/questions" style={{ color: "#8696a8", textDecoration: "none", fontSize: 14 }}>
             Pertanyaan
           </a>
+          <a href="/archive" style={{ color: "#8696a8", textDecoration: "none", fontSize: 14 }}>
+            Arsip
+          </a>
         </nav>
         <main>{children}</main>
       </body>

@@ -4,6 +4,7 @@ import { KafkaService } from "../kafka/kafka.service";
 import { TOPICS } from "@platform/shared";
 import { BroadcastCommandDto, CreateTaskDto, TriageTaskDto } from "./dto";
 import { ROLE_NAMES } from "../common/role-names";
+import { ObjectStorageService } from "../storage/object-storage.service";
 
 /**
  * One division running several jobs at once = several Task rows with the
@@ -17,6 +18,7 @@ export class TasksService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly kafka: KafkaService,
+    private readonly storage: ObjectStorageService,
   ) {}
 
   async create(dto: CreateTaskDto) {
@@ -47,6 +49,48 @@ export class TasksService {
       where: { divisionId, status: { in: ["RUNNING", "REVIEW", "APPROVAL_PENDING"] } },
       include: { assignments: { include: { agent: true } } },
     });
+  }
+
+  /**
+   * "Arsip" - one place for every finished task's output, so no one on the
+   * team has to guess/ask where a result landed (see checkIdleAgents's own
+   * confused Chief of Staff). For each task this resolves where the output
+   * actually lives:
+   *  - a GitHub folder, if the executor's output had committable code (see
+   *    apps/worker's commitCodeIfPresent - detected here via the
+   *    github-output.json marker it drops in object storage, no DB column
+   *    needed);
+   *  - a Google Drive link, once that integration exists (same marker-file
+   *    pattern reserved as `driveUrl` - always null today);
+   *  - otherwise the generated PDF, which every task with output already has.
+   */
+  async archive() {
+    const tasks = await this.prisma.task.findMany({
+      where: { resultSummary: { not: null } },
+      include: { division: { select: { name: true, slug: true } }, project: { select: { name: true } } },
+      orderBy: { updatedAt: "desc" },
+      take: 200,
+    });
+
+    return Promise.all(
+      tasks.map(async (task: (typeof tasks)[number]) => {
+        const github = await this.storage.getJson<{ url: string; folder: string }>(`${task.id}/github-output.json`);
+        const drive = await this.storage.getJson<{ url: string }>(`${task.id}/drive-output.json`);
+        const hasPdf = await this.storage.exists(`${task.id}/executor-output.pdf`);
+        return {
+          id: task.id,
+          title: task.title,
+          status: task.status,
+          division: task.division,
+          project: task.project,
+          updatedAt: task.updatedAt,
+          resultSummary: task.resultSummary,
+          githubUrl: github?.url ?? null,
+          driveUrl: drive?.url ?? null,
+          pdfAvailable: hasPdf,
+        };
+      }),
+    );
   }
 
   

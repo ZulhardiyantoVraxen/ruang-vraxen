@@ -34,6 +34,11 @@ export class TasksController {
     return this.service.runningByDivision(divisionId);
   }
 
+  /** "Arsip" page - every task with output, plus where that output actually lives (GitHub repo / Drive / PDF). */
+  @Get("archive") archive() {
+    return this.service.archive();
+  }
+
   @Post(":id/assign") assign(@Param("id") id: string, @Body() body: { agentId: string; role: "EXECUTOR" | "REVIEWER" }) {
     return this.service.assign(id, body.agentId, body.role);
   }
@@ -67,6 +72,25 @@ export class TasksController {
    * by design), so the API reads the object itself and streams it back -
    * the browser only ever talks to the already-public API, never MinIO.
    */
+  /**
+   * "Tombol read all" for a task's result: Task.resultSummary is hard-capped
+   * at 500 chars server-side (see TasksService.recordResult callers in
+   * apps/worker) so cards stay short by default, but the FULL executor
+   * output already exists as the .md object the worker wrote alongside the
+   * PDF. This just reads that back as plain text for the director to expand
+   * inline, instead of needing to open the PDF for a couple more sentences.
+   */
+  @Get(":id/full-text")
+  async fullText(@Param("id") id: string, @Res() res: Response) {
+    const key = `${id}/executor-output.md`;
+    if (!(await this.storage.exists(key))) {
+      throw new NotFoundException("Teks lengkap belum tersedia untuk task ini.");
+    }
+    const buffer = await this.storage.getObjectBuffer(key);
+    res.set({ "Content-Type": "text/plain; charset=utf-8" });
+    res.send(buffer.toString("utf-8"));
+  }
+
   @Get(":id/pdf")
   async pdf(@Param("id") id: string, @Res() res: Response) {
     const key = `${id}/executor-output.pdf`;

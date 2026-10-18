@@ -423,11 +423,32 @@ async function commitCodeIfPresent(taskId: string, title: string, divisionSlug: 
   if (blocks.length === 0) return;
 
   const folder = `${divisionSlug}/${taskId}-${slugify(title)}`;
+  let committed = 0;
   for (const block of blocks) {
     try {
       await github.putFile(`${folder}/${block.filename}`, block.code, `${title} - ${block.filename}`);
+      committed += 1;
     } catch (err) {
       console.error(`[task-assigned] gagal commit ${block.filename} untuk task ${taskId} ke GitHub:`, err);
+    }
+  }
+
+  // "Arsip ... jika dari repository langsung mengarah ke repositorynya" -
+  // there's no DB column tracking this (would need a migration), so drop a
+  // small marker object next to the .md/.pdf output instead - same pattern,
+  // zero schema risk. The Archive page checks for this file to decide
+  // whether a task's output lives in the GitHub repo.
+  if (committed > 0) {
+    try {
+      const url = `https://github.com/${config.github.owner}/${config.github.repo}/tree/main/${folder}`;
+      await objectStorage.putTaskOutput(
+        taskId,
+        "github-output.json",
+        JSON.stringify({ url, folder, committedAt: new Date().toISOString() }),
+        "application/json",
+      );
+    } catch (err) {
+      console.error(`[task-assigned] gagal menyimpan marker arsip GitHub untuk task ${taskId}:`, err);
     }
   }
 }

@@ -234,8 +234,5 @@
   color: #7f91a3;
   margin: 6px 0 0;
   line-height: 1.4;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  /* Clamping itself is handled by ExpandableText (inline, toggled on expand) - this class only sets the look. */
 }

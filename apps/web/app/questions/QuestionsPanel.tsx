@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { api } from "@/lib/api";
+import ExpandableText from "../components/ExpandableText";
 import styles from "./questions.module.css";
 
 type Question = {
@@ -70,7 +71,7 @@ export default function QuestionsPanel({ initial }: { initial: Question[] }) {
             </span>
             {q.task && <span className={styles.taskLink}>Task: {q.task.title}</span>}
           </div>
-          <p className={styles.question}>{q.question}</p>
+          <ExpandableText text={q.question} className={styles.question} />
           <textarea
             className={styles.answerBox}
             placeholder="Ketik jawaban Anda..."

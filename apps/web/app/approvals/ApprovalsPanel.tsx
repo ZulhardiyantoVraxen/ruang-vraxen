@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { api } from "@/lib/api";
+import ExpandableText from "../components/ExpandableText";
 import styles from "./approvals.module.css";
 
 type Approval = {
@@ -90,11 +91,15 @@ export default function ApprovalsPanel({ initial }: { initial: Approval[] }) {
               <span className={styles.priorityPill}>P{a.task.priority}</span>
             </div>
 
-            {a.task.description && <p className={styles.cardDescription}>{a.task.description}</p>}
+            {a.task.description && <ExpandableText text={a.task.description} className={styles.cardDescription} />}
             {a.task.resultSummary && (
               <div className={styles.resultBox}>
                 <p className={styles.resultLabel}>Hasil yang diajukan</p>
-                <p className={styles.resultText}>{a.task.resultSummary}</p>
+                <ExpandableText
+                  text={a.task.resultSummary}
+                  className={styles.resultText}
+                  onLoadFull={() => api.taskFullText(a.task.id)}
+                />
               </div>
             )}
 
