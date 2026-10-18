@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { OpenRouterService } from "../model-routing/openrouter.service";
 import { TasksService } from "../tasks/tasks.service";
@@ -24,6 +24,8 @@ type ChatResult =
  */
 @Injectable()
 export class ChatService {
+  private readonly logger = new Logger(ChatService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly modelRouting: OpenRouterService,
@@ -62,13 +64,31 @@ ATURAN PALING PENTING: lihat pesan TERAKHIR dari Direktur saja untuk memutuskan 
 Jangan pernah mencampur teks biasa dengan JSON dalam satu balasan.`;
 
     const route = await this.modelRouting.resolveModel(agent.agentRole.tier, agent.modelVariant);
-    const { content, tokensIn, tokensOut } = await this.modelRouting.chat(route.modelId, [
-      { role: "system", content: systemPrompt },
-      ...history.map((m: { role: string; content: string }) => ({
-        role: (m.role === "DIRECTOR" ? "user" : "assistant") as "user" | "assistant",
-        content: m.content,
-      })),
-    ]);
+
+    let content: string, tokensIn: number, tokensOut: number;
+    try {
+      const result = await this.modelRouting.chat(route.modelId, [
+        { role: "system", content: systemPrompt },
+        ...history.map((m: { role: string; content: string }) => ({
+          role: (m.role === "DIRECTOR" ? "user" : "assistant") as "user" | "assistant",
+          content: m.content,
+        })),
+      ]);
+      content = result.content;
+      tokensIn = result.tokensIn;
+      tokensOut = result.tokensOut;
+    } catch (err) {
+      // A provider hiccup (rate limit, timeout, model down) must read as the
+      // agent being briefly unreachable, not as a broken chat feature - the
+      // director's own message is already saved above, so this only affects
+      // the reply. Previously this threw straight through to a raw HTTP 500
+      // in the UI ("API .../chat failed: 500").
+      this.logger.error(`OpenRouter call gagal untuk agent ${agentId} (model ${route.modelId}): ${err instanceof Error ? err.message : err}`);
+      const friendly =
+        "Maaf, model AI saya sedang sibuk atau kena limit sesaat (kemungkinan karena trafik tinggi barusan). Coba kirim lagi dalam beberapa menit.";
+      await this.prisma.chatMessage.create({ data: { agentId, role: "AGENT", content: friendly } });
+      return { type: "chat", reply: friendly };
+    }
 
     await this.usage
       .record({
@@ -93,12 +113,19 @@ Jangan pernah mencampur teks biasa dengan JSON dalam satu balasan.`;
     }
 
     if (task) {
-      const result = await this.tasks.createDirectCommand(agent.id, task.title, task.description);
-      const note = result.queued
-        ? `📋 Dicatat sebagai tugas: "${task.title}" — saya sedang mengerjakan hal lain, akan saya kerjakan begitu selesai.`
-        : `📋 Dicatat sebagai tugas: "${task.title}" — langsung saya kerjakan, bisa dipantau di Task Board.`;
-      await this.prisma.chatMessage.create({ data: { agentId, role: "AGENT", content: note } });
-      return { type: "task", taskId: result.taskId, title: task.title, queued: result.queued, note };
+      try {
+        const result = await this.tasks.createDirectCommand(agent.id, task.title, task.description);
+        const note = result.queued
+          ? `📋 Dicatat sebagai tugas: "${task.title}" — saya sedang mengerjakan hal lain, akan saya kerjakan begitu selesai.`
+          : `📋 Dicatat sebagai tugas: "${task.title}" — langsung saya kerjakan, bisa dipantau di Task Board.`;
+        await this.prisma.chatMessage.create({ data: { agentId, role: "AGENT", content: note } });
+        return { type: "task", taskId: result.taskId, title: task.title, queued: result.queued, note };
+      } catch (err) {
+        this.logger.error(`Gagal membuat task dari chat untuk agent ${agentId}: ${err instanceof Error ? err.message : err}`);
+        const friendly = `Maaf, saya mengerti ini sebagai tugas ("${task.title}") tapi gagal mencatatnya barusan. Coba kirim lagi sebentar.`;
+        await this.prisma.chatMessage.create({ data: { agentId, role: "AGENT", content: friendly } });
+        return { type: "chat", reply: friendly };
+      }
     }
 
     await this.prisma.chatMessage.create({ data: { agentId, role: "AGENT", content } });
