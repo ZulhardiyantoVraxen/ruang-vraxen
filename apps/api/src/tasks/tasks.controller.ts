@@ -1,10 +1,14 @@
-import { Body, Controller, Get, Param, Patch, Post } from "@nestjs/common";
+import { Body, Controller, Get, NotFoundException, Param, Patch, Post } from "@nestjs/common";
 import { TasksService } from "./tasks.service";
 import { BroadcastCommandDto, CreateTaskDto, TriageTaskDto } from "./dto";
+import { ObjectStorageService } from "../storage/object-storage.service";
 
 @Controller("tasks")
 export class TasksController {
-  constructor(private readonly service: TasksService) {}
+  constructor(
+    private readonly service: TasksService,
+    private readonly storage: ObjectStorageService,
+  ) {}
 
   @Post() create(@Body() dto: CreateTaskDto) {
     return this.service.create(dto);
@@ -50,5 +54,20 @@ export class TasksController {
   @Patch(":id/result")
   recordResult(@Param("id") id: string, @Body() body: { resultSummary: string; resultObjectKey?: string }) {
     return this.service.recordResult(id, body.resultSummary, body.resultObjectKey);
+  }
+
+  /**
+   * On-demand PDF of a task's result (first step of "output dokumen
+   * tersimpan di Google Drive" - a real file has to exist before it can be
+   * uploaded anywhere). Stored at a predictable key by the worker right
+   * after the executor finishes, so no DB column is needed for it.
+   */
+  @Get(":id/pdf-url")
+  async pdfUrl(@Param("id") id: string) {
+    const key = `${id}/executor-output.pdf`;
+    if (!(await this.storage.exists(key))) {
+      throw new NotFoundException("PDF belum tersedia untuk task ini.");
+    }
+    return { url: await this.storage.getSignedDownloadUrl(key) };
   }
 }

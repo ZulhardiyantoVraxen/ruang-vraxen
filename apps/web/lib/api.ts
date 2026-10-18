@@ -69,6 +69,8 @@ export const api = {
     >(`/agents/${agentId}/chat`, { method: "POST", body: JSON.stringify({ message }) }),
   createProject: (name: string, description?: string) =>
     request<any>("/projects", { method: "POST", body: JSON.stringify({ name, description }) }),
+  /** Signed, time-limited URL to the task's result as a PDF - 404s (via a thrown error) until the worker has generated one. */
+  taskPdfUrl: (taskId: string) => request<{ url: string }>(`/tasks/${taskId}/pdf-url`),
   /** The director's queue of questions raised by PM/decision-point agents mid-task. */
   openQuestions: () => request<any[]>("/questions/open"),
   answerQuestion: (id: string, answer: string) =>

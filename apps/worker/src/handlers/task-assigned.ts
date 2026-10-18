@@ -1,7 +1,7 @@
 import { prisma } from "../prisma";
 import { apiClient } from "../api-client";
 import { config } from "../config";
-import { OpenRouterClient, ObjectStorageClient, resolveModel } from "@platform/shared";
+import { OpenRouterClient, ObjectStorageClient, resolveModel, markdownToPdfBuffer } from "@platform/shared";
 import { executorPrompt, pmExecutorPrompt, reviewerPrompt } from "../prompts";
 
 const openRouter = new OpenRouterClient(config.openRouterApiKey);
@@ -76,6 +76,7 @@ async function runStandardExecutor(
 
   // Long output goes to object storage; the task row only keeps a short summary + the key.
   const objectKey = await objectStorage.putTaskOutput(task.id, "executor-output.md", content, "text/markdown");
+  await storeAsPdf(task.id, task.title, content);
   const summary = content.length > 500 ? `${content.slice(0, 500)}…` : content;
   await apiClient.recordResult(task.id, summary, objectKey);
   await apiClient.setAgentStatus(agent.id, "IDLE");
@@ -146,6 +147,7 @@ async function runPmExecutor(
   }
 
   const objectKey = await objectStorage.putTaskOutput(task.id, "executor-output.md", parsed.summary, "text/markdown");
+  await storeAsPdf(task.id, task.title, parsed.summary);
   const summary = parsed.summary.length > 500 ? `${parsed.summary.slice(0, 500)}…` : parsed.summary;
   await apiClient.recordResult(task.id, summary, objectKey);
   await apiClient.setAgentStatus(agent.id, "IDLE");
@@ -210,6 +212,23 @@ async function runQaIfReviewerAssigned(taskId: string, executorOutput: string) {
     await apiClient.qaPassed(taskId);
   } else {
     await apiClient.qaFailed(taskId); // bumps revisionCount; TasksService stops the loop at maxRevisions
+  }
+}
+
+/**
+ * Renders the executor's markdown result as a PDF and stores it alongside
+ * the .md original, at a predictable key (`<taskId>/executor-output.pdf`)
+ * so the API can serve it without needing a DB column for it. Best-effort:
+ * a rendering problem (unexpected content, PDFKit edge case) must never
+ * block the task from completing - the .md output already has the real
+ * result recorded.
+ */
+async function storeAsPdf(taskId: string, title: string, content: string) {
+  try {
+    const pdf = await markdownToPdfBuffer(title, content);
+    await objectStorage.putTaskOutput(taskId, "executor-output.pdf", pdf, "application/pdf");
+  } catch (err) {
+    console.error(`[task-assigned] gagal membuat PDF untuk task ${taskId}:`, err);
   }
 }
 

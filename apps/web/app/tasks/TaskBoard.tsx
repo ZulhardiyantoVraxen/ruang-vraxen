@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import styles from "./taskBoard.module.css";
+import { api } from "../../lib/api";
 
 type Task = {
   id: string;
@@ -64,6 +65,20 @@ export default function TaskBoard({
 }) {
   const [divisionFilter, setDivisionFilter] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
+  const [pdfLoadingId, setPdfLoadingId] = useState<string | null>(null);
+
+  async function downloadPdf(taskId: string) {
+    if (pdfLoadingId) return;
+    setPdfLoadingId(taskId);
+    try {
+      const { url } = await api.taskPdfUrl(taskId);
+      window.open(url, "_blank");
+    } catch {
+      alert("PDF belum tersedia untuk task ini.");
+    } finally {
+      setPdfLoadingId(null);
+    }
+  }
 
   const filtered = useMemo(() => {
     return tasks.filter((t) => {
@@ -129,6 +144,16 @@ export default function TaskBoard({
                       <div className={`${styles.cardDue} ${isOverdue(t.dueAt, t.status) ? styles.cardDueLate : ""}`}>
                         Deadline: {formatTime(t.dueAt)}
                       </div>
+                    )}
+                    {t.resultSummary && (t.status === "DONE" || t.status === "REVIEW") && (
+                      <button
+                        type="button"
+                        className={styles.cardPdfButton}
+                        disabled={pdfLoadingId === t.id}
+                        onClick={() => downloadPdf(t.id)}
+                      >
+                        {pdfLoadingId === t.id ? "Membuka…" : "📄 Unduh PDF"}
+                      </button>
                     )}
                   </div>
                 ))}

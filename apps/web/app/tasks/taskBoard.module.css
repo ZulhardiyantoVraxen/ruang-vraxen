@@ -203,6 +203,29 @@
   font-weight: 600;
 }
 
+.cardPdfButton {
+  margin-top: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid #2a3a4a;
+  background: #16222e;
+  color: #9fd8cc;
+  cursor: pointer;
+  width: 100%;
+  text-align: center;
+}
+
+.cardPdfButton:hover {
+  background: #1c2c3a;
+}
+
+.cardPdfButton:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .cardSummary {
   font-size: 11px;
   color: #7f91a3;

@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 /**
@@ -27,8 +27,12 @@ export class ObjectStorageClient {
     });
   }
 
-  /** Stores `content` under `<taskId>/<filename>` and returns the object key to save on the Task row. */
-  async putTaskOutput(taskId: string, filename: string, content: string, contentType = "text/plain") {
+  /**
+   * Stores `content` under `<taskId>/<filename>` and returns the object key
+   * to save on the Task row. `content` is a Buffer for binary output (PDF,
+   * images) and a string for plain text/markdown.
+   */
+  async putTaskOutput(taskId: string, filename: string, content: string | Buffer, contentType = "text/plain") {
     const key = `${taskId}/${filename}`;
     await this.s3.send(
       new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: content, ContentType: contentType }),
@@ -40,5 +44,15 @@ export class ObjectStorageClient {
     return getSignedUrl(this.s3, new GetObjectCommand({ Bucket: this.bucket, Key: key }), {
       expiresIn: expiresInSeconds,
     });
+  }
+
+  /** Cheap existence check so callers can return a clean 404 instead of letting an S3 error bubble up. */
+  async exists(key: string): Promise<boolean> {
+    try {
+      await this.s3.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key }));
+      return true;
+    } catch {
+      return false;
+    }
   }
 }

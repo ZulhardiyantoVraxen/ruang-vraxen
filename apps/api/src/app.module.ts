@@ -12,6 +12,7 @@ import { OrchestratorModule } from "./orchestrator/orchestrator.module";
 import { QuestionsModule } from "./questions/questions.module";
 import { ProjectsModule } from "./projects/projects.module";
 import { ChatModule } from "./chat/chat.module";
+import { StorageModule } from "./storage/storage.module";
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { ChatModule } from "./chat/chat.module";
     QuestionsModule,
     ProjectsModule,
     ChatModule,
+    StorageModule,
   ],
 })
 export class AppModule {}
