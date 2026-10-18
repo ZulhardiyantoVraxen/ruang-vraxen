@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import styles from "./office.module.css";
 import { api } from "@/lib/api";
 import ExpandableText from "./components/ExpandableText";
+import DigitalClock from "./components/DigitalClock";
 
 // The 3D scene pulls in three.js + @react-three/fiber, which is a sizeable
 // chunk of JS and needs a WebGL canvas - loaded only when the person
@@ -303,6 +304,45 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
   const [modalCommandText, setModalCommandText] = useState("");
   const [modalCommandSending, setModalCommandSending] = useState(false);
 
+  // Division modal: filter the "papan tulis" task list by report date
+  // ("Divisi bisa di klik per tanggal laporannya") - purely client-side,
+  // filtering the already-loaded task list by Task.updatedAt's own date.
+  const [divisionDateFilter, setDivisionDateFilter] = useState("");
+
+  // Division modal: "saya ingin bisa menambah personel didalam menu itu,
+  // perannya saya yang buat, untuk nama dan model generate dari agentic AI"
+  // - director types only the role name (+ optional tanggung jawab), the
+  // API infers the tier and generates a name, see api.quickAddPersonnel.
+  const [newRoleName, setNewRoleName] = useState("");
+  const [newRoleResponsibilities, setNewRoleResponsibilities] = useState("");
+  const [addingPersonnel, setAddingPersonnel] = useState(false);
+  const [addPersonnelError, setAddPersonnelError] = useState<string | null>(null);
+
+  async function addPersonnel() {
+    if (!selectedDivision) return;
+    const roleName = newRoleName.trim();
+    if (!roleName || addingPersonnel) return;
+    setAddingPersonnel(true);
+    setAddPersonnelError(null);
+    try {
+      await api.quickAddPersonnel(selectedDivision.slug, roleName, newRoleResponsibilities.trim() || undefined);
+      setNewRoleName("");
+      setNewRoleResponsibilities("");
+      api.listDivisions().then(setDivisions).catch(() => {});
+    } catch {
+      setAddPersonnelError("Gagal menambah personel. Coba lagi.");
+    } finally {
+      setAddingPersonnel(false);
+    }
+  }
+
+  useEffect(() => {
+    setDivisionDateFilter("");
+    setNewRoleName("");
+    setNewRoleResponsibilities("");
+    setAddPersonnelError(null);
+  }, [selectedDivisionSlug]);
+
   useEffect(() => {
     if (!selected) {
       setModalChat([]);
@@ -495,6 +535,7 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
           <span className={styles.chipValue}>{approvals.length}</span>
           <span className={styles.chipLabel}>Approval</span>
         </div>
+        <DigitalClock />
         <div className={styles.viewToggle}>
           <button
             type="button"
@@ -966,27 +1007,130 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
                 </div>
               );
             })()}
+
+            {/* "Ketika nama divisi diklik muncul menu untuk menampilkan nama
+                personel" - every agent currently staffed in this division,
+                each clickable straight into the existing chat-capable
+                agent-detail modal ("saya bisa langsung bertanya ke
+                personel" - that chat already exists there). */}
+            <p className={styles.modalSectionTitle}>
+              Personel ({selectedDivision.agentRoles.flatMap((r) => r.agents).length})
+            </p>
             <div className={styles.taskList}>
-              {(selectedDivision.tasks ?? []).length === 0 && (
-                <p className={styles.empty}>Belum ada task untuk divisi ini.</p>
+              {selectedDivision.agentRoles.flatMap((r) => r.agents).length === 0 && (
+                <p className={styles.modalTaskEmpty}>Belum ada personel di divisi ini.</p>
               )}
-              {(selectedDivision.tasks ?? []).map((t) => (
-                <div key={t.id} className={styles.taskRow}>
-                  <div className={styles.taskRowTop}>
-                    <span className={styles.taskTitle}>{t.title}</span>
-                    <span className={styles.taskStatus} style={{ color: TASK_STATUS_COLOR[t.status] ?? "#7f91a3" }}>
-                      {TASK_STATUS_LABEL[t.status] ?? t.status}
-                    </span>
+              {selectedDivision.agentRoles.map((r) =>
+                r.agents.map((a) => (
+                  <div
+                    key={a.id}
+                    className={styles.taskRow}
+                    style={{ cursor: "pointer" }}
+                    onClick={() => {
+                      setSelected({
+                        ...a,
+                        role: r.name,
+                        division: selectedDivision.name,
+                        tier: r.tier,
+                        requiresApproval: r.requiresApproval,
+                      });
+                      setSelectedDivisionSlug(null);
+                    }}
+                  >
+                    <div className={styles.taskRowTop}>
+                      <span className={styles.taskTitle}>{a.displayName}</span>
+                      <span className={styles.taskStatus} style={{ color: STATUS_COLOR[a.status] ?? "#5b6b7a" }}>
+                        {statusLabel(a.status, a.id)}
+                      </span>
+                    </div>
+                    <div className={styles.taskRowMeta}>
+                      <span>{r.name}</span>
+                      <span>Tingkat {r.tier}</span>
+                    </div>
                   </div>
-                  {t.resultSummary && (
-                    <ExpandableText
-                      text={t.resultSummary}
-                      className={styles.taskSummary}
-                      onLoadFull={() => api.taskFullText(t.id)}
-                    />
-                  )}
-                </div>
-              ))}
+                ))
+              )}
+            </div>
+
+            {/* "Saya ingin bisa menambah personel didalam menu itu" */}
+            <p className={styles.modalSectionTitle}>Tambah personel</p>
+            <p className={styles.modalChatHint}>
+              Cukup isi perannya - tingkat model, serta nama dan model agentnya digenerate otomatis oleh agentic AI.
+            </p>
+            <input
+              className={styles.modalCommandInput}
+              style={{ marginBottom: 8 }}
+              placeholder="Nama peran, mis. Analis Kepatuhan"
+              value={newRoleName}
+              onChange={(e) => setNewRoleName(e.target.value)}
+            />
+            <input
+              className={styles.modalCommandInput}
+              style={{ marginBottom: 8 }}
+              placeholder="Tanggung jawab (opsional)"
+              value={newRoleResponsibilities}
+              onChange={(e) => setNewRoleResponsibilities(e.target.value)}
+            />
+            <button
+              type="button"
+              className={styles.modalCommandSend}
+              disabled={!newRoleName.trim() || addingPersonnel}
+              onClick={addPersonnel}
+            >
+              {addingPersonnel ? "Menambah…" : "+ Tambah personel"}
+            </button>
+            {addPersonnelError && <p className={styles.modalTaskEmpty}>{addPersonnelError}</p>}
+
+            {/* "Divisi bisa diklik per tanggal laporannya dan progressnya" */}
+            <p className={styles.modalSectionTitle} style={{ marginTop: 16 }}>
+              Laporan task
+            </p>
+            <div className={styles.modalCommandRow}>
+              <input
+                type="date"
+                className={styles.modalCommandInput}
+                value={divisionDateFilter}
+                onChange={(e) => setDivisionDateFilter(e.target.value)}
+              />
+              {divisionDateFilter && (
+                <button type="button" className={styles.modalCommandSend} onClick={() => setDivisionDateFilter("")}>
+                  Reset
+                </button>
+              )}
+            </div>
+            <div className={styles.taskList}>
+              {(() => {
+                const tasks = (selectedDivision.tasks ?? []).filter(
+                  (t) => !divisionDateFilter || t.updatedAt.slice(0, 10) === divisionDateFilter
+                );
+                if (tasks.length === 0) {
+                  return (
+                    <p className={styles.empty}>
+                      {divisionDateFilter ? "Tidak ada task pada tanggal ini." : "Belum ada task untuk divisi ini."}
+                    </p>
+                  );
+                }
+                return tasks.map((t) => (
+                  <div key={t.id} className={styles.taskRow}>
+                    <div className={styles.taskRowTop}>
+                      <span className={styles.taskTitle}>{t.title}</span>
+                      <span className={styles.taskStatus} style={{ color: TASK_STATUS_COLOR[t.status] ?? "#7f91a3" }}>
+                        {TASK_STATUS_LABEL[t.status] ?? t.status}
+                      </span>
+                    </div>
+                    <div className={styles.taskRowMeta}>
+                      <span>{new Date(t.updatedAt).toLocaleString("id-ID")}</span>
+                    </div>
+                    {t.resultSummary && (
+                      <ExpandableText
+                        text={t.resultSummary}
+                        className={styles.taskSummary}
+                        onLoadFull={() => api.taskFullText(t.id)}
+                      />
+                    )}
+                  </div>
+                ));
+              })()}
             </div>
             <button type="button" className={styles.modalClose} onClick={() => setSelectedDivisionSlug(null)}>
               Tutup

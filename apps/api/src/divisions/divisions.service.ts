@@ -1,14 +1,18 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { KafkaService } from "../kafka/kafka.service";
-import { TOPICS } from "@platform/shared";
-import { CreateAgentRoleDto, CreateDivisionDto } from "./dto";
+import { TOPICS, inferRoleCapability } from "@platform/shared";
+import { CreateAgentRoleDto, CreateDivisionDto, QuickAddPersonnelDto } from "./dto";
+import { OpenRouterService } from "../model-routing/openrouter.service";
+import { AgentsService } from "../agents/agents.service";
 
 @Injectable()
 export class DivisionsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly kafka: KafkaService,
+    private readonly openRouter: OpenRouterService,
+    private readonly agents: AgentsService,
   ) {}
 
   /** Every division (and its roster below) is a row, created at runtime - never hardcoded. */
@@ -104,5 +108,68 @@ export class DivisionsService {
         requiresApproval: dto.requiresApproval ?? false,
       },
     });
+  }
+
+  /**
+   * "Saya ingin bisa menambah personel didalam menu itu, Perannya saya yang
+   * buat, untuk Nama dan Model itu generate dari agentic AI" - the director
+   * types only the role name (and optionally what it does); everything else
+   * is inferred/generated:
+   *  - Tier: inferRoleCapability() reads the role name + responsibilities
+   *    and maps CODE/REASONING/VISION -> AHLI, GENERAL -> RUTIN. ATAS is
+   *    deliberately never auto-picked - it's reserved for roles the
+   *    director creates by hand via addRole(), since ATAS's ModelClass has
+   *    no free-tier fallback (always paid).
+   *  - Model: comes for free once the tier is picked - AgentsService /
+   *    OpenRouterService already resolve an agent's actual model from its
+   *    role's tier + modelVariant, nothing extra to generate here.
+   *  - Name: asks the model itself for one plausible Indonesian human name
+   *    that fits the role, via the same OpenRouterService every other chat
+   *    feature in this app already uses.
+   */
+  async quickAddPersonnel(divisionSlug: string, dto: QuickAddPersonnelDto) {
+    const division = await this.getBySlug(divisionSlug);
+    const capability = inferRoleCapability(dto.roleName, dto.responsibilities);
+    const tier = capability === "GENERAL" ? "RUTIN" : "AHLI";
+    const modelClass = await this.prisma.modelClass.findUniqueOrThrow({ where: { tier } });
+
+    const displayName = await this.generatePersonnelName(dto.roleName, dto.responsibilities);
+
+    const role = await this.prisma.agentRole.create({
+      data: {
+        divisionId: division.id,
+        name: dto.roleName,
+        tier,
+        modelClassId: modelClass.id,
+        responsibilities: dto.responsibilities,
+        maxConcurrentTasks: 1,
+        requiresApproval: false,
+      },
+    });
+    const agent = await this.agents.provision(role.id, displayName);
+    return { role, agent };
+  }
+
+  /** Asks the model for one short, plausible Indonesian full name for a new staff member in this role - falls back to a generic placeholder if the call fails for any reason, since name generation should never block the actual hire. */
+  private async generatePersonnelName(roleName: string, responsibilities?: string | null): Promise<string> {
+    try {
+      const decision = await this.openRouter.resolveModel("RUTIN", "FREE", { roleName, responsibilities });
+      const response = await this.openRouter.chat(decision.modelId, [
+        {
+          role: "system",
+          content:
+            "Kamu memberi nama untuk staf baru di sebuah kantor virtual Indonesia. Balas HANYA dengan satu nama lengkap orang Indonesia yang masuk akal untuk peran yang diberikan, tanpa gelar, tanpa penjelasan, tanpa tanda kutip - hanya nama, maksimal 3 kata.",
+        },
+        { role: "user", content: `Peran: ${roleName}${responsibilities ? `\nTanggung jawab: ${responsibilities}` : ""}` },
+      ]);
+      const name = response.content
+        ?.trim()
+        .replace(/^["'“‘]+|["'”’]+$/g, "")
+        .split("\n")[0]
+        ?.slice(0, 60);
+      return name && name.length > 1 ? name : `Staf ${roleName}`;
+    } catch {
+      return `Staf ${roleName}`;
+    }
   }
 }

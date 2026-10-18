@@ -53,6 +53,36 @@
   margin-top: 2px;
 }
 
+/* ---------- Digital clock (Asia/Jakarta, green LED theme) ---------- */
+
+.digitalClock {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  padding: 6px 14px;
+  border-radius: 10px;
+  background: #05120c;
+  border: 1px solid #16412f;
+  margin-left: auto;
+}
+
+.digitalClockTime {
+  font-family: var(--font-mono), monospace;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: #39ff8a;
+  text-shadow: 0 0 6px rgba(57, 255, 138, 0.55), 0 0 14px rgba(57, 255, 138, 0.25);
+  line-height: 1.1;
+}
+
+.digitalClockDate {
+  font-size: 10.5px;
+  color: #4fae79;
+  margin-top: 2px;
+  letter-spacing: 0.02em;
+}
+
 .dotWorking { color: #5fc9b8; }
 .dotReviewing { color: #e0a63e; }
 .dotCollaborating { color: #9f8fe0; }

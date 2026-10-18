@@ -106,6 +106,16 @@ export const api = {
   /** Director confirms a repo-request question - records which GitHub repo the project now commits to, and resumes the paused task. */
   confirmRepo: (id: string, repoName: string) =>
     request<any>(`/questions/${id}/confirm-repo`, { method: "PATCH", body: JSON.stringify({ repoName }) }),
+  /**
+   * "Tambah personel" from the division menu - director supplies only a
+   * role name (+ optional responsibilities); tier and the agent's display
+   * name are inferred/generated server-side.
+   */
+  quickAddPersonnel: (divisionSlug: string, roleName: string, responsibilities?: string) =>
+    request<{ role: any; agent: any }>(`/divisions/${divisionSlug}/personnel`, {
+      method: "POST",
+      body: JSON.stringify({ roleName, responsibilities }),
+    }),
   startOnboarding: (brief: string) => request<any>("/onboarding/start", { method: "POST", body: JSON.stringify({ brief }) }),
   answerOnboarding: (sessionId: string, answer: string) =>
     request<any>(`/onboarding/${sessionId}/answer`, { method: "POST", body: JSON.stringify({ answer }) }),
