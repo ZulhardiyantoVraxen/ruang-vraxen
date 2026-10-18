@@ -683,7 +683,13 @@
   align-items: center;
   justify-content: center;
   padding: 20px;
-  z-index: 50;
+  /* drei's <Html> labels inside the 3D scene (agent nametags, division
+     signs) render as real DOM nodes with an inline z-index in the tens of
+     millions by default (zIndexRange), so they can sit "in front of" or
+     "behind" each other correctly as the camera orbits. A modal z-index of
+     50 loses to that every time, which is why the agent-detail card used to
+     render with the 3D labels bleeding on top of it. Clear the whole range. */
+  z-index: 2147483000;
 }
 
 .modal {

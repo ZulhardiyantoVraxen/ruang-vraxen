@@ -72,10 +72,11 @@ model Division {
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
 
-  agentRoles      AgentRole[]
-  tasks           Task[]
-  costCaps        CostCap[]
-  onboarding      DivisionOnboardingSession[]
+  agentRoles        AgentRole[]
+  tasks             Task[]
+  costCaps          CostCap[]
+  onboarding        DivisionOnboardingSession[]
+  directorQuestions DirectorQuestion[]
 
   @@index([status])
 }
@@ -127,9 +128,10 @@ model Agent {
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
-  assignments     TaskAssignment[]
-  usageLogs       UsageLog[]
-  costCaps        CostCap[]
+  assignments       TaskAssignment[]
+  usageLogs         UsageLog[]
+  costCaps          CostCap[]
+  directorQuestions DirectorQuestion[]
 
   @@index([status])
 }
@@ -145,6 +147,7 @@ enum TaskStatus {
   BLOCKED
   REVIEW
   APPROVAL_PENDING
+  AWAITING_DIRECTOR // paused: the executor (a PM/decision-point role) asked the director a question - see DirectorQuestion
   DONE
   REJECTED
 }
@@ -175,6 +178,7 @@ model Task {
   assignments        TaskAssignment[]
   approvals          Approval[]
   usageLogs          UsageLog[]
+  directorQuestions  DirectorQuestion[]
 
   @@index([divisionId, status])
   @@index([parentTaskId])
@@ -223,6 +227,38 @@ model Approval {
   notes         String?
 
   @@index([taskId, status])
+}
+
+enum DirectorQuestionStatus {
+  OPEN
+  ANSWERED
+}
+
+/**
+ * "PM harus lebih interaktif bertanya kepada direktur": a PM/decision-point
+ * agent (any AgentRole.requiresApproval=true role - Chief of Staff included)
+ * can raise a question instead of (or ahead of) delivering a task result.
+ * taskId is nullable so a question can also stand alone, not tied to one
+ * specific task. Answering one tied to a task un-pauses it - see
+ * ApprovalsModule-style wiring in DirectorQuestionsService.
+ */
+model DirectorQuestion {
+  id          String                 @id @default(cuid())
+  taskId      String?
+  task        Task?                  @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  agentId     String
+  agent       Agent                  @relation(fields: [agentId], references: [id])
+  divisionId  String
+  division    Division               @relation(fields: [divisionId], references: [id], onDelete: Cascade)
+  question    String                 @db.Text
+  answer      String?                @db.Text
+  status      DirectorQuestionStatus @default(OPEN)
+  askedAt     DateTime               @default(now())
+  answeredAt  DateTime?
+
+  @@index([status])
+  @@index([divisionId])
+  @@index([taskId])
 }
 
 // --- Cost / usage guardrails -------------------------------------------------

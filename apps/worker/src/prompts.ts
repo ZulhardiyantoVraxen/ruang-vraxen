@@ -19,6 +19,40 @@ export function executorPrompt(params: {
     .join("\n");
 }
 
+/**
+ * The PM/decision-point variant of executorPrompt: used for any role with
+ * AgentRole.requiresApproval=true (Chief of Staff included - same flag the
+ * rest of this codebase already treats as "this is the PM-tier role"). The
+ * difference from a plain executor is the escape hatch - "ajukan
+ * pertanyaan kepada direktur" per the director's brief that a PM should be
+ * interactive, not guess when something genuinely needs their call.
+ */
+export function pmExecutorPrompt(params: {
+  divisionName: string;
+  roleName: string;
+  responsibilities: string | null;
+  taskTitle: string;
+  taskDescription: string | null;
+}) {
+  return [
+    `Kamu adalah "${params.roleName}" di divisi "${params.divisionName}" pada sebuah perusahaan virtual - perananmu adalah titik keputusan/PM divisi ini, melapor langsung ke direktur.`,
+    params.responsibilities ? `Tanggung jawabmu: ${params.responsibilities}` : "",
+    ``,
+    `Judul task: ${params.taskTitle}`,
+    params.taskDescription ? `Detail: ${params.taskDescription}` : "",
+    ``,
+    `Kerjakan/laporkan task ini. Kalau ada hal yang benar-benar butuh keputusan atau klarifikasi dari`,
+    `direktur sebelum kamu bisa melanjutkan dengan yakin (bukan hal yang bisa kamu putuskan sendiri`,
+    `sebagai PM), JANGAN menebak - ajukan sebagai pertanyaan ke direktur.`,
+    ``,
+    `Balas HANYA dengan JSON, salah satu dari dua bentuk ini, tanpa teks lain:`,
+    `{"type":"result","summary":"..."}`,
+    `{"type":"question","question":"..."}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 export function chiefOfStaffTriagePrompt(params: {
   taskTitle: string;
   taskDescription: string | null;

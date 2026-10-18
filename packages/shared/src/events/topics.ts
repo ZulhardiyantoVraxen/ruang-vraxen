@@ -49,6 +49,8 @@ export const TASK_EVENT_TYPES = [
   "task.approved",
   "task.rejected",
   "task.completed",
+  "director.question.asked",   // a PM/decision-point executor needs the director's input before finishing
+  "director.question.answered",
 ] as const;
 
 export const USAGE_EVENT_TYPES = [

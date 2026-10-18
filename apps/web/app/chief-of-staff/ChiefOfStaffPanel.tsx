@@ -36,6 +36,7 @@ const STATUS_LABEL: Record<string, string> = {
   BLOCKED: "Terblokir",
   REVIEW: "Review",
   APPROVAL_PENDING: "Menunggu approval Anda",
+  AWAITING_DIRECTOR: "Menunggu jawaban Anda",
   DONE: "Selesai",
   REJECTED: "Ditolak",
 };
@@ -49,6 +50,7 @@ const STATUS_COLOR: Record<string, string> = {
   BLOCKED: "#e06c5b",
   REVIEW: "#e0a63e",
   APPROVAL_PENDING: "#9f8fe0",
+  AWAITING_DIRECTOR: "#9f8fe0",
   DONE: "#5fc9b8",
   REJECTED: "#e06c5b",
 };

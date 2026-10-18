@@ -47,6 +47,10 @@ export const api = {
       "/tasks/broadcast",
       { method: "POST", body: JSON.stringify({ agentIds, instruction }) }
     ),
+  /** The director's queue of questions raised by PM/decision-point agents mid-task. */
+  openQuestions: () => request<any[]>("/questions/open"),
+  answerQuestion: (id: string, answer: string) =>
+    request<any>(`/questions/${id}/answer`, { method: "PATCH", body: JSON.stringify({ answer }) }),
   startOnboarding: (brief: string) => request<any>("/onboarding/start", { method: "POST", body: JSON.stringify({ brief }) }),
   answerOnboarding: (sessionId: string, answer: string) =>
     request<any>(`/onboarding/${sessionId}/answer`, { method: "POST", body: JSON.stringify({ answer }) }),

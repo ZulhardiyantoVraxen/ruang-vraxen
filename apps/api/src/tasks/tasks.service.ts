@@ -175,6 +175,62 @@ export class TasksService {
     }
   }
 
+  /**
+   * "Auditor akan selalu menagih pekerjaan setiap harinya kepada PM" - fans
+   * out one status-report task to every division's PM. Idempotent per
+   * calendar day per division (checked by title + createdAt, no extra
+   * state needed) so calling this more than once in the same day - a retry,
+   * an overlapping cron tick - never double-tags anyone. The chase itself
+   * is just a normal Task; PM is a requiresApproval role, so it runs
+   * through the structured PM-executor prompt (apps/worker's
+   * runPmExecutor) which is exactly what lets the PM raise a question back
+   * instead of guessing.
+   */
+  async auditDailyCheckIn() {
+    const MARKER_TITLE = "[Audit harian] Laporkan progres timnya hari ini";
+    const startOfDay = new Date();
+    startOfDay.setUTCHours(0, 0, 0, 0);
+
+    const divisions = await this.prisma.division.findMany({
+      where: { status: "ACTIVE", slug: { not: "pusat" } },
+      include: { agentRoles: { include: { agents: true } } },
+    });
+
+    const dispatched: { divisionSlug: string; pmName: string; taskId: string }[] = [];
+    const skipped: { divisionSlug: string; reason: string }[] = [];
+
+    for (const division of divisions) {
+      const pmRole = division.agentRoles.find((r) => r.requiresApproval && r.agents.length > 0);
+      if (!pmRole) {
+        skipped.push({ divisionSlug: division.slug, reason: "Belum ada PM" });
+        continue;
+      }
+      const pm = pmRole.agents[0];
+
+      const already = await this.prisma.task.findFirst({
+        where: { divisionId: division.id, title: MARKER_TITLE, createdAt: { gte: startOfDay } },
+      });
+      if (already) {
+        skipped.push({ divisionSlug: division.slug, reason: "Sudah ditagih hari ini" });
+        continue;
+      }
+
+      const task = await this.prisma.task.create({
+        data: {
+          divisionId: division.id,
+          title: MARKER_TITLE,
+          description:
+            "Auditor menagih: ringkas status semua task yang sedang berjalan di divisi Anda hari ini. Kalau ada hal yang butuh keputusan atau klarifikasi direktur, ajukan sebagai pertanyaan - jangan menebak.",
+          priority: 3,
+        },
+      });
+      await this.assign(task.id, pm.id, "EXECUTOR");
+      dispatched.push({ divisionSlug: division.slug, pmName: pm.displayName, taskId: task.id });
+    }
+
+    return { dispatched, skipped };
+  }
+
   /** QA failed -> bounce back to the executor, bounded by Task.maxRevisions (Catatan Penting). */
   async qaFailed(taskId: string) {
     const task = await this.prisma.task.findUniqueOrThrow({ where: { id: taskId } });

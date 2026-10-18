@@ -34,4 +34,7 @@ export const apiClient = {
   setAgentStatus: (agentId: string, status: string) => post(`/agents/${agentId}/status`, { status }, "PATCH"),
   triageTask: (taskId: string, params: { divisionSlug: string; agentId: string; reasoning?: string; forceFinal?: boolean }) =>
     post(`/tasks/${taskId}/triage`, params),
+  /** A PM/decision-point executor needs the director's input instead of finishing the task outright. */
+  askDirector: (params: { agentId: string; divisionId: string; taskId?: string; question: string }) =>
+    post("/questions", params),
 };

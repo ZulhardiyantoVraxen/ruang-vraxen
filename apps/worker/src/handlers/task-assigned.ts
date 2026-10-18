@@ -2,7 +2,7 @@ import { prisma } from "../prisma";
 import { apiClient } from "../api-client";
 import { config } from "../config";
 import { OpenRouterClient, ObjectStorageClient, resolveModel } from "@platform/shared";
-import { executorPrompt, reviewerPrompt } from "../prompts";
+import { executorPrompt, pmExecutorPrompt, reviewerPrompt } from "../prompts";
 
 const openRouter = new OpenRouterClient(config.openRouterApiKey);
 const objectStorage = new ObjectStorageClient(config.objectStorage);
@@ -33,6 +33,23 @@ export async function handleTaskAssigned(taskId: string, payload: TaskAssignedPa
 
   await apiClient.setAgentStatus(agent.id, "WORKING");
 
+  // AgentRole.requiresApproval is this codebase's existing "is a PM/
+  // decision-point role" flag (same one task-created.ts uses to find Chief
+  // of Staff) - any such role gets the structured prompt that can raise a
+  // question to the director instead of forcing a guess.
+  if (agent.agentRole.requiresApproval) {
+    await runPmExecutor(agent, task);
+  } else {
+    await runStandardExecutor(agent, task);
+  }
+}
+
+async function runStandardExecutor(
+  agent: Awaited<ReturnType<typeof prisma.agent.findUniqueOrThrow>> & {
+    agentRole: { name: string; responsibilities: string | null; modelClass: any; division: any };
+  },
+  task: Awaited<ReturnType<typeof prisma.task.findUniqueOrThrow>> & { division: { name: string } },
+) {
   const route = resolveModel(agent.agentRole.modelClass, agent.modelVariant);
   const prompt = executorPrompt({
     divisionName: task.division.name,
@@ -49,7 +66,7 @@ export async function handleTaskAssigned(taskId: string, payload: TaskAssignedPa
 
   await apiClient.recordUsage({
     agentId: agent.id,
-    taskId,
+    taskId: task.id,
     modelUsed: route.modelId,
     modelVariant: route.variant,
     source: "kanban",
@@ -58,12 +75,78 @@ export async function handleTaskAssigned(taskId: string, payload: TaskAssignedPa
   });
 
   // Long output goes to object storage; the task row only keeps a short summary + the key.
-  const objectKey = await objectStorage.putTaskOutput(taskId, "executor-output.md", content, "text/markdown");
+  const objectKey = await objectStorage.putTaskOutput(task.id, "executor-output.md", content, "text/markdown");
   const summary = content.length > 500 ? `${content.slice(0, 500)}…` : content;
-  await apiClient.recordResult(taskId, summary, objectKey);
+  await apiClient.recordResult(task.id, summary, objectKey);
   await apiClient.setAgentStatus(agent.id, "IDLE");
 
-  await runQaIfReviewerAssigned(taskId, content);
+  await runQaIfReviewerAssigned(task.id, content);
+}
+
+/**
+ * PM/decision-point variant: the model replies with structured JSON that
+ * can either finish the task normally or raise a question to the director
+ * (per "PM harus lebih interaktif bertanya kepada direktur" - this applies
+ * any time a PM is executing a task, not only during Auditor's daily
+ * check-in). A reply that isn't clean JSON is treated as a plain result
+ * rather than crashing the consumer loop - same fail-safe philosophy as the
+ * QA verdict parse below.
+ */
+async function runPmExecutor(
+  agent: Awaited<ReturnType<typeof prisma.agent.findUniqueOrThrow>> & {
+    agentRole: { name: string; responsibilities: string | null; modelClass: any; division: any; divisionId: string };
+  },
+  task: Awaited<ReturnType<typeof prisma.task.findUniqueOrThrow>> & { division: { name: string } },
+) {
+  const route = resolveModel(agent.agentRole.modelClass, agent.modelVariant);
+  const prompt = pmExecutorPrompt({
+    divisionName: task.division.name,
+    roleName: agent.agentRole.name,
+    responsibilities: agent.agentRole.responsibilities,
+    taskTitle: task.title,
+    taskDescription: task.description,
+  });
+
+  const { content, tokensIn, tokensOut } = await openRouter.chat(route.modelId, [
+    { role: "system", content: agent.systemPrompt ?? "Kerjakan task yang diberikan sebaik mungkin, sebagai PM divisi." },
+    { role: "user", content: prompt },
+  ]);
+
+  await apiClient.recordUsage({
+    agentId: agent.id,
+    taskId: task.id,
+    modelUsed: route.modelId,
+    modelVariant: route.variant,
+    source: "kanban",
+    tokensIn,
+    tokensOut,
+  });
+
+  let parsed: { type: "result"; summary: string } | { type: "question"; question: string };
+  try {
+    parsed = JSON.parse(content);
+    if (parsed.type !== "result" && parsed.type !== "question") throw new Error("unexpected type");
+  } catch {
+    parsed = { type: "result", summary: content };
+  }
+
+  if (parsed.type === "question") {
+    await apiClient.askDirector({
+      agentId: agent.id,
+      divisionId: agent.agentRole.divisionId,
+      taskId: task.id,
+      question: parsed.question,
+    });
+    await apiClient.setAgentStatus(agent.id, "IDLE");
+    return; // task is now AWAITING_DIRECTOR - resumes via QuestionsService.answer once the director replies
+  }
+
+  const objectKey = await objectStorage.putTaskOutput(task.id, "executor-output.md", parsed.summary, "text/markdown");
+  const summary = parsed.summary.length > 500 ? `${parsed.summary.slice(0, 500)}…` : parsed.summary;
+  await apiClient.recordResult(task.id, summary, objectKey);
+  await apiClient.setAgentStatus(agent.id, "IDLE");
+
+  await runQaIfReviewerAssigned(task.id, parsed.summary);
 }
 
 /** If a REVIEWER was already assigned to this task, run the review now that output exists. */

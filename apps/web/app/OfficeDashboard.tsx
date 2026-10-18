@@ -56,6 +56,7 @@ const TASK_STATUS_LABEL: Record<string, string> = {
   BLOCKED: "Terblokir",
   REVIEW: "Review",
   APPROVAL_PENDING: "Menunggu approval",
+  AWAITING_DIRECTOR: "Menunggu jawaban direktur",
   DONE: "Selesai",
   REJECTED: "Ditolak",
 };
@@ -69,6 +70,7 @@ const TASK_STATUS_COLOR: Record<string, string> = {
   BLOCKED: "#d6665b",
   REVIEW: "#e0a63e",
   APPROVAL_PENDING: "#9f8fe0",
+  AWAITING_DIRECTOR: "#9f8fe0",
   DONE: "#5fc9b8",
   REJECTED: "#d6665b",
 };

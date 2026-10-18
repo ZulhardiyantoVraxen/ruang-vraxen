@@ -1,0 +1,148 @@
+.page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 28px 24px 56px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.header h1 {
+  font-size: 22px;
+  font-weight: 600;
+  margin: 0;
+  color: #eef3f7;
+}
+
+.headerCount {
+  font-size: 12.5px;
+  color: #7f91a3;
+  font-family: var(--font-mono), monospace;
+}
+
+.lead {
+  font-size: 13px;
+  color: #7f91a3;
+  line-height: 1.6;
+  margin: -8px 0 0;
+}
+
+.empty {
+  color: #5c6c7c;
+  font-size: 13px;
+  padding: 24px 0;
+  text-align: center;
+  border-radius: 14px;
+  border: 1px dashed #243545;
+}
+
+.card {
+  border-radius: 14px;
+  border: 1px solid #1c2b3a;
+  background: #0d1826;
+  padding: 16px 18px;
+  animation: cardIn 0.22s ease both;
+}
+
+@keyframes cardIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.cardMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.fromBadge {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
+  color: #9f8fe0;
+  background: rgba(159, 143, 224, 0.14);
+  border: 1px solid rgba(159, 143, 224, 0.35);
+  padding: 2px 9px;
+  border-radius: 999px;
+}
+
+.metaText {
+  font-size: 11.5px;
+  color: #7f91a3;
+}
+
+.taskLink {
+  font-size: 11px;
+  color: #5fc9b8;
+  margin-left: auto;
+}
+
+.question {
+  font-size: 13.5px;
+  color: #eef3f7;
+  line-height: 1.55;
+  margin: 0 0 12px;
+}
+
+.answerBox {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 64px;
+  resize: vertical;
+  background: #0b141f;
+  border: 1px solid #243545;
+  border-radius: 10px;
+  padding: 10px 11px;
+  color: #eef3f7;
+  font-size: 12.5px;
+  font-family: inherit;
+  line-height: 1.45;
+}
+
+.answerBox:focus {
+  outline: none;
+  border-color: #5fc9b8;
+}
+
+.answerBox::placeholder {
+  color: #4f6070;
+}
+
+.answerRow {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.answerButton {
+  padding: 9px 18px;
+  border-radius: 9px;
+  border: none;
+  background: linear-gradient(135deg, #5fc9b8, #3d9c8f);
+  color: #06201a;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.answerButton:disabled {
+  background: #233140;
+  color: #5c6c7c;
+  cursor: not-allowed;
+}

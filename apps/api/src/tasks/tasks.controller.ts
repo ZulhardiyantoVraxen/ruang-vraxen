@@ -15,6 +15,11 @@ export class TasksController {
     return this.service.broadcast(dto);
   }
 
+  /** Auditor's daily chase - called once a day by the VPS's own crontab (see infra/). */
+  @Post("audit/daily-check-in") auditDailyCheckIn() {
+    return this.service.auditDailyCheckIn();
+  }
+
   @Get("division/:divisionId/running") running(@Param("divisionId") divisionId: string) {
     return this.service.runningByDivision(divisionId);
   }
