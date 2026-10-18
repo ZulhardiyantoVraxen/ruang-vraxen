@@ -124,7 +124,11 @@ async function runPmExecutor(
 
   let parsed: { type: "result"; summary: string } | { type: "question"; question: string };
   try {
-    parsed = JSON.parse(content);
+    // Models love wrapping JSON in a ```json ... ``` fence even when told
+    // not to - strip it before parsing instead of falling back to treating
+    // the whole fenced block (literal backticks included) as plain text.
+    const unfenced = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+    parsed = JSON.parse(unfenced);
     if (parsed.type !== "result" && parsed.type !== "question") throw new Error("unexpected type");
   } catch {
     parsed = { type: "result", summary: content };
@@ -194,7 +198,8 @@ async function runQaIfReviewerAssigned(taskId: string, executorOutput: string) {
 
   let verdict: { verdict: "PASS" | "FAIL"; notes: string };
   try {
-    verdict = JSON.parse(content);
+    const unfenced = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+    verdict = JSON.parse(unfenced);
   } catch {
     // A reviewer model that doesn't return clean JSON is a prompt/model
     // problem, not a task problem - fail safe to a human rather than silently passing.
