@@ -37,8 +37,7 @@ export class UploadsController {
   async download(@Param("id") id: string, @Res() res: Response) {
     try {
       const { buffer, contentType } = await this.service.getFile(id);
-      // Original filename is everything after the first "-" in the id (see UploadsService.save).
-      const filename = id.slice(id.indexOf("-") + 1) || id;
+      const filename = this.service.filenameFromId(id);
       res.set({
         "Content-Type": contentType ?? "application/octet-stream",
         "Content-Disposition": `inline; filename="${filename.replace(/"/g, "")}"`,

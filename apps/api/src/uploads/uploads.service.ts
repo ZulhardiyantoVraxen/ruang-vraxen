@@ -47,9 +47,15 @@ export class UploadsService {
     return TEXT_LIKE_MIME_PREFIXES.some((p) => mimeType.startsWith(p)) || TEXT_LIKE_MIME_TYPES.has(mimeType);
   }
 
-  /** Original filename is everything after the first "-" in the id (see save() above). */
+  // randomUUID() is always exactly 36 chars (8-4-4-4-12 hex + 4 hyphens), so
+  // the filename save() appended starts right after it + the separator
+  // hyphen. A UUID contains hyphens itself, so splitting on the first "-"
+  // (as an earlier version of this did) only strips part of it.
+  private static readonly UUID_PREFIX_LEN = 36 + 1;
+
+  /** Original filename is everything after the UUID prefix in the id (see save() above). */
   filenameFromId(id: string): string {
-    return id.slice(id.indexOf("-") + 1) || id;
+    return id.length > UploadsService.UUID_PREFIX_LEN ? id.slice(UploadsService.UUID_PREFIX_LEN) : id;
   }
 
   /**
