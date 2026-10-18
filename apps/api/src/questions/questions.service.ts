@@ -1,9 +1,13 @@
-import { Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { KafkaService } from "../kafka/kafka.service";
 import { TasksService } from "../tasks/tasks.service";
 import { TOPICS } from "@platform/shared";
-import { AskDirectorDto } from "./dto";
+import { AskDirectorDto, RequestGithubRepoDto } from "./dto";
+import { ObjectStorageService } from "../storage/object-storage.service";
+
+/** Machine-parseable prefix the Questions UI uses to show a dedicated "create this repo" card instead of a free-text answer box. */
+const REPO_REQUEST_PREFIX = "[REPO_REQUEST:";
 
 /**
  * "PM harus lebih interaktif bertanya kepada direktur": any PM/decision-point
@@ -17,6 +21,7 @@ export class QuestionsService {
     private readonly prisma: PrismaService,
     private readonly kafka: KafkaService,
     private readonly tasks: TasksService,
+    private readonly storage: ObjectStorageService,
   ) {}
 
   /** The director's inbox - every question still waiting on an answer. */
@@ -26,7 +31,7 @@ export class QuestionsService {
       include: {
         agent: { select: { displayName: true, agentRole: { select: { name: true } } } },
         division: { select: { name: true, slug: true } },
-        task: { select: { id: true, title: true } },
+        task: { select: { id: true, title: true, projectId: true, project: { select: { name: true } } } },
       },
       orderBy: { askedAt: "asc" },
     });
@@ -47,6 +52,50 @@ export class QuestionsService {
       payload: { taskId: dto.taskId, agentId: dto.agentId, question: dto.question },
     });
     return question;
+  }
+
+  /**
+   * "Nanti PM minta saya tulis nama repositorynya, sebelum melakukan
+   * development ... nama repo sendiri itu sesuai dari permintaan PM" - a
+   * repo request is the SAME pause-the-task mechanism as `ask()`, just with
+   * a machine-parseable question string so the Questions page can render a
+   * "create this repo" card (with a pre-filled GitHub link and a confirm
+   * button) instead of a free-text answer box. This always goes straight to
+   * the director, never through Chief of Staff - creating a GitHub repo
+   * isn't something any agent, CoS included, can actually do.
+   */
+  requestRepo(dto: RequestGithubRepoDto) {
+    const question = `${REPO_REQUEST_PREFIX}${dto.repoName}]${dto.reason ? ` ${dto.reason}` : ""}`;
+    return this.ask({ agentId: dto.agentId, divisionId: dto.divisionId, taskId: dto.taskId, question });
+  }
+
+  /**
+   * Director confirms a repo-request question: records which GitHub repo the
+   * task's Project now commits to (a small marker object, not a DB column -
+   * same pattern as apps/worker's github-output.json, so no migration is
+   * needed), then resumes the paused task via the normal `answer()` path.
+   */
+  async confirmRepo(id: string, repoName: string) {
+    const question = await this.prisma.directorQuestion.findUniqueOrThrow({ where: { id } });
+    if (!question.question.startsWith(REPO_REQUEST_PREFIX)) {
+      throw new BadRequestException("Pertanyaan ini bukan permintaan repository.");
+    }
+    if (!question.taskId) {
+      throw new BadRequestException("Permintaan repository ini tidak terkait task mana pun.");
+    }
+    const task = await this.prisma.task.findUnique({ where: { id: question.taskId } });
+    if (!task?.projectId) {
+      throw new NotFoundException("Task untuk permintaan ini tidak terkait project - repo tidak bisa dikaitkan.");
+    }
+
+    const owner = process.env.GITHUB_OWNER ?? "";
+    await this.storage.putJson(`project/${task.projectId}/github-repo.json`, {
+      repo: repoName,
+      owner,
+      confirmedAt: new Date().toISOString(),
+    });
+
+    return this.answer(id, `Repo sudah dibuat: https://github.com/${owner}/${repoName}`);
   }
 
   /** Director answers - a question tied to a task hands that task straight back to the same agent to resume. */

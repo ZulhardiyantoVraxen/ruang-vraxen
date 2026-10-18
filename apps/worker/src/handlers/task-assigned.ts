@@ -13,10 +13,6 @@ import { executorPrompt, pmExecutorPrompt, chiefOfStaffRelayPrompt, reviewerProm
 
 const openRouter = new OpenRouterClient(config.openRouterApiKey);
 const objectStorage = new ObjectStorageClient(config.objectStorage);
-const github =
-  config.github.token && config.github.owner && config.github.repo
-    ? new GitHubClient({ owner: config.github.owner, repo: config.github.repo, token: config.github.token })
-    : null;
 
 interface TaskAssignedPayload {
   agentId: string;
@@ -88,7 +84,7 @@ async function runStandardExecutor(
   // Long output goes to object storage; the task row only keeps a short summary + the key.
   const objectKey = await objectStorage.putTaskOutput(task.id, "executor-output.md", content, "text/markdown");
   await storeAsPdf(task.id, task.title, content);
-  await commitCodeIfPresent(task.id, task.title, task.division.slug, content);
+  await commitCodeIfPresent(task.id, task.title, task.division.slug, task.projectId, content);
   const summary = content.length > 500 ? `${content.slice(0, 500)}…` : content;
   await apiClient.recordResult(task.id, summary, objectKey);
   await apiClient.setAgentStatus(agent.id, "IDLE");
@@ -112,12 +108,14 @@ async function runPmExecutor(
   task: Awaited<ReturnType<typeof prisma.task.findUniqueOrThrow>> & { division: { name: string; slug: string } },
 ) {
   const route = resolveModel(agent.agentRole.modelClass, agent.modelVariant);
+  const projectContext = await getProjectContext(task.projectId);
   const prompt = pmExecutorPrompt({
     divisionName: task.division.name,
     roleName: agent.agentRole.name,
     responsibilities: agent.agentRole.responsibilities,
     taskTitle: task.title,
     taskDescription: task.description,
+    project: projectContext,
   });
 
   const { content, tokensIn, tokensOut } = await openRouter.chat(route.modelId, [
@@ -135,16 +133,39 @@ async function runPmExecutor(
     tokensOut,
   });
 
-  let parsed: { type: "result"; summary: string } | { type: "question"; question: string };
+  type PmReply =
+    | { type: "result"; summary: string }
+    | { type: "question"; question: string }
+    | { type: "repo_request"; repoName: string; reason?: string };
+
+  let parsed: PmReply;
   try {
     // Models love wrapping JSON in a ```json ... ``` fence even when told
     // not to - strip it before parsing instead of falling back to treating
     // the whole fenced block (literal backticks included) as plain text.
     const unfenced = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
     parsed = JSON.parse(unfenced);
-    if (parsed.type !== "result" && parsed.type !== "question") throw new Error("unexpected type");
+    if (parsed.type !== "result" && parsed.type !== "question" && parsed.type !== "repo_request") {
+      throw new Error("unexpected type");
+    }
   } catch {
     parsed = { type: "result", summary: content };
+  }
+
+  if (parsed.type === "repo_request") {
+    // "Nanti PM minta saya tulis nama repositorynya, sebelum melakukan
+    // development ... akun ini khusus untuk output project" - always goes
+    // straight to the (human) director, never through Chief of Staff -
+    // creating a repo is a manual action only the director can do.
+    await apiClient.requestGithubRepo({
+      agentId: agent.id,
+      divisionId: agent.agentRole.divisionId,
+      taskId: task.id,
+      repoName: parsed.repoName,
+      reason: parsed.reason,
+    });
+    await apiClient.setAgentStatus(agent.id, "IDLE");
+    return; // task is now AWAITING_DIRECTOR - resumes once the director confirms the repo exists (see QuestionsService.confirmRepo)
   }
 
   if (parsed.type === "question") {
@@ -184,6 +205,7 @@ async function runPmExecutor(
       responsibilities: agent.agentRole.responsibilities,
       taskTitle: task.title,
       taskDescription: followUpDescription,
+      project: projectContext,
     });
 
     const followUp = await openRouter.chat(route.modelId, [
@@ -203,9 +225,23 @@ async function runPmExecutor(
     try {
       const unfenced = followUp.content.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
       parsed = JSON.parse(unfenced);
-      if (parsed.type !== "result" && parsed.type !== "question") throw new Error("unexpected type");
+      if (parsed.type !== "result" && parsed.type !== "question" && parsed.type !== "repo_request") {
+        throw new Error("unexpected type");
+      }
     } catch {
       parsed = { type: "result", summary: followUp.content };
+    }
+
+    if (parsed.type === "repo_request") {
+      await apiClient.requestGithubRepo({
+        agentId: agent.id,
+        divisionId: agent.agentRole.divisionId,
+        taskId: task.id,
+        repoName: parsed.repoName,
+        reason: parsed.reason,
+      });
+      await apiClient.setAgentStatus(agent.id, "IDLE");
+      return;
     }
 
     if (parsed.type === "question") {
@@ -226,12 +262,41 @@ async function runPmExecutor(
 
   const objectKey = await objectStorage.putTaskOutput(task.id, "executor-output.md", parsed.summary, "text/markdown");
   await storeAsPdf(task.id, task.title, parsed.summary);
-  await commitCodeIfPresent(task.id, task.title, task.division.slug, parsed.summary);
+  await commitCodeIfPresent(task.id, task.title, task.division.slug, task.projectId, parsed.summary);
   const summary = parsed.summary.length > 500 ? `${parsed.summary.slice(0, 500)}…` : parsed.summary;
   await apiClient.recordResult(task.id, summary, objectKey);
   await apiClient.setAgentStatus(agent.id, "IDLE");
 
   await runQaIfReviewerAssigned(task.id, parsed.summary);
+}
+
+/**
+ * Tells a PM whether the Project its current task belongs to already has a
+ * GitHub repo the director confirmed (see QuestionsService.confirmRepo) -
+ * drives the repo_request instruction in pmExecutorPrompt. Tasks with no
+ * Project at all (ad hoc work, idle check-ins) get no project context and
+ * never trigger a repo_request.
+ */
+async function getProjectContext(projectId: string | null): Promise<{ name: string; repoConfigured: boolean } | null> {
+  if (!projectId) return null;
+  const project = await prisma.project.findUnique({ where: { id: projectId } });
+  if (!project) return null;
+  const repoConfigured =
+    !!config.github.token && !!config.github.owner && (await objectStorage.exists(`project/${projectId}/github-repo.json`));
+  return { name: project.name, repoConfigured };
+}
+
+/** Reads the repo a Project's GitHub output actually commits to, once the director has confirmed one (see confirmRepo). */
+async function getConfiguredRepo(projectId: string): Promise<{ owner: string; repo: string } | null> {
+  const key = `project/${projectId}/github-repo.json`;
+  if (!(await objectStorage.exists(key))) return null;
+  try {
+    const buffer = await objectStorage.getObjectBuffer(key);
+    const data = JSON.parse(buffer.toString("utf-8")) as { repo: string; owner?: string };
+    return { owner: data.owner || config.github.owner, repo: data.repo };
+  } catch {
+    return null;
+  }
 }
 
 function isChiefOfStaff(roleName: string, divisionSlug: string): boolean {
@@ -411,17 +476,34 @@ async function storeAsPdf(taskId: string, title: string, content: string) {
 /**
  * "Output yang menghasilkan source code otomatis tersimpan di Github" -
  * scans the executor's markdown result for fenced code blocks with a
- * recognized language and, if any exist, commits each as its own file to
- * the dedicated output repo, grouped under `<divisionSlug>/<taskId>-<slug
- * of title>/`. A report with no code fences (the common case) is a no-op -
- * this never runs for plain text output. Best-effort like storeAsPdf: a
- * GitHub API hiccup must never block the task from completing.
+ * recognized language and, if any exist, commits each as its own file,
+ * grouped under `<divisionSlug>/<taskId>-<slug of title>/`. A report with no
+ * code fences (the common case) is a no-op - this never runs for plain text
+ * output. Best-effort like storeAsPdf: a GitHub API hiccup must never block
+ * the task from completing.
+ *
+ * "Akun ini khusus untuk output project ... nama repo sesuai permintaan PM"
+ * - there is no single shared output repo any more. Each Project gets its
+ * own repo, named by the PM and created manually by the director (see
+ * pmExecutorPrompt's repo_request instruction + QuestionsService.confirmRepo).
+ * A task with no Project, or whose Project has no confirmed repo yet, simply
+ * isn't committed anywhere - its code still lives in the .md/.pdf output.
  */
-async function commitCodeIfPresent(taskId: string, title: string, divisionSlug: string, content: string) {
-  if (!github) return; // GITHUB_PAT not configured - skip silently rather than crash
+async function commitCodeIfPresent(taskId: string, title: string, divisionSlug: string, projectId: string | null, content: string) {
+  if (!config.github.token || !config.github.owner) return; // GITHUB_PAT not configured - skip silently rather than crash
   const blocks = extractCodeBlocks(content);
   if (blocks.length === 0) return;
+  if (!projectId) return; // ad hoc task, not tied to any project repo
 
+  const repoInfo = await getConfiguredRepo(projectId);
+  if (!repoInfo) {
+    console.error(
+      `[task-assigned] task ${taskId} menghasilkan kode tapi project ${projectId} belum punya repo GitHub terkonfirmasi - commit dilewati.`,
+    );
+    return;
+  }
+
+  const github = new GitHubClient({ owner: repoInfo.owner, repo: repoInfo.repo, token: config.github.token });
   const folder = `${divisionSlug}/${taskId}-${slugify(title)}`;
   let committed = 0;
   for (const block of blocks) {
@@ -440,11 +522,11 @@ async function commitCodeIfPresent(taskId: string, title: string, divisionSlug: 
   // whether a task's output lives in the GitHub repo.
   if (committed > 0) {
     try {
-      const url = `https://github.com/${config.github.owner}/${config.github.repo}/tree/main/${folder}`;
+      const url = `https://github.com/${repoInfo.owner}/${repoInfo.repo}/tree/main/${folder}`;
       await objectStorage.putTaskOutput(
         taskId,
         "github-output.json",
-        JSON.stringify({ url, folder, committedAt: new Date().toISOString() }),
+        JSON.stringify({ url, folder, repo: repoInfo.repo, committedAt: new Date().toISOString() }),
         "application/json",
       );
     } catch (err) {

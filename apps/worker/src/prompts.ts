@@ -33,21 +33,44 @@ export function pmExecutorPrompt(params: {
   responsibilities: string | null;
   taskTitle: string;
   taskDescription: string | null;
+  /** Set only when this task belongs to a Project - drives the repo_request instruction below. */
+  project?: { name: string; repoConfigured: boolean } | null;
 }) {
+  const repoGuidance = params.project
+    ? params.project.repoConfigured
+      ? [
+          ``,
+          `Task ini bagian dari project "${params.project.name}" - repository GitHub project ini SUDAH dibuat direktur, jadi kalau pekerjaanmu menghasilkan kode, langsung tulis kodenya di hasil akhirmu seperti biasa (otomatis ter-commit ke repo project ini).`,
+        ]
+      : [
+          ``,
+          `Task ini bagian dari project "${params.project.name}" - repository GitHub untuk project ini BELUM dibuat.`,
+          `Akun GitHub yang dipakai perusahaan ini khusus untuk output project, jadi direktur sendiri yang membuatkan`,
+          `repo-nya secara manual - kamu hanya mengusulkan namanya. Kalau task ini butuh kamu menulis kode, JANGAN`,
+          `langsung menulis kode dulu - ajukan dulu permintaan pembuatan repo ke direktur, dengan nama singkat/slug`,
+          `yang jelas (contoh: "nama-project-ringkas"). Kalau task ini TIDAK butuh kode (laporan, analisis, dsb),`,
+          `abaikan ini dan kerjakan seperti biasa.`,
+        ]
+    : [];
+
   return [
     `Kamu adalah "${params.roleName}" di divisi "${params.divisionName}" pada sebuah perusahaan virtual - perananmu adalah titik keputusan/PM divisi ini, melapor langsung ke direktur.`,
     params.responsibilities ? `Tanggung jawabmu: ${params.responsibilities}` : "",
     ``,
     `Judul task: ${params.taskTitle}`,
     params.taskDescription ? `Detail: ${params.taskDescription}` : "",
+    ...repoGuidance,
     ``,
     `Kerjakan/laporkan task ini. Kalau ada hal yang benar-benar butuh keputusan atau klarifikasi dari`,
     `direktur sebelum kamu bisa melanjutkan dengan yakin (bukan hal yang bisa kamu putuskan sendiri`,
     `sebagai PM), JANGAN menebak - ajukan sebagai pertanyaan ke direktur.`,
     ``,
-    `Balas HANYA dengan JSON, salah satu dari dua bentuk ini, tanpa teks lain:`,
+    `Balas HANYA dengan JSON, salah satu dari bentuk berikut, tanpa teks lain:`,
     `{"type":"result","summary":"..."}`,
     `{"type":"question","question":"..."}`,
+    params.project && !params.project.repoConfigured
+      ? `{"type":"repo_request","repoName":"nama-slug-pendek","reason":"kenapa butuh repo ini"}`
+      : "",
   ]
     .filter(Boolean)
     .join("\n");

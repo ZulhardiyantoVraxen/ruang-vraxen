@@ -103,6 +103,9 @@ export const api = {
   openQuestions: () => request<any[]>("/questions/open"),
   answerQuestion: (id: string, answer: string) =>
     request<any>(`/questions/${id}/answer`, { method: "PATCH", body: JSON.stringify({ answer }) }),
+  /** Director confirms a repo-request question - records which GitHub repo the project now commits to, and resumes the paused task. */
+  confirmRepo: (id: string, repoName: string) =>
+    request<any>(`/questions/${id}/confirm-repo`, { method: "PATCH", body: JSON.stringify({ repoName }) }),
   startOnboarding: (brief: string) => request<any>("/onboarding/start", { method: "POST", body: JSON.stringify({ brief }) }),
   answerOnboarding: (sessionId: string, answer: string) =>
     request<any>(`/onboarding/${sessionId}/answer`, { method: "POST", body: JSON.stringify({ answer }) }),

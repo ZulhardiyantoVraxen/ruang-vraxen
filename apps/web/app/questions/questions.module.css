@@ -146,3 +146,47 @@
   color: #5c6c7c;
   cursor: not-allowed;
 }
+
+.repoReason {
+  font-size: 12px;
+  color: #7f91a3;
+  line-height: 1.5;
+  margin: 0 0 12px;
+}
+
+.repoRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.repoNameInput {
+  flex: 1;
+  min-width: 180px;
+  background: #0b141f;
+  border: 1px solid #243545;
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: #eef3f7;
+  font-size: 12.5px;
+  font-family: var(--font-mono), monospace;
+}
+
+.repoNameInput:focus {
+  outline: none;
+  border-color: #5fc9b8;
+}
+
+.repoCreateLink {
+  font-size: 12px;
+  font-weight: 600;
+  color: #5b9bd6;
+  background: rgba(91, 155, 214, 0.12);
+  border: 1px solid rgba(91, 155, 214, 0.35);
+  padding: 8px 12px;
+  border-radius: 8px;
+  text-decoration: none;
+  white-space: nowrap;
+}

@@ -40,6 +40,17 @@ export class ObjectStorageClient {
     return key;
   }
 
+  /**
+   * Writes an arbitrary object by its own explicit key, not nested under a
+   * task id - used for small cross-cutting markers like "which GitHub repo
+   * does this Project commit to" (see apps/worker's github-repo.json) that
+   * don't belong to any single task.
+   */
+  async putObject(key: string, content: string | Buffer, contentType = "text/plain") {
+    await this.s3.send(new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: content, ContentType: contentType }));
+    return key;
+  }
+
   async getSignedDownloadUrl(key: string, expiresInSeconds = 3600) {
     return getSignedUrl(this.s3, new GetObjectCommand({ Bucket: this.bucket, Key: key }), {
       expiresIn: expiresInSeconds,

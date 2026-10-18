@@ -37,4 +37,7 @@ export const apiClient = {
   /** A PM/decision-point executor needs the director's input instead of finishing the task outright. */
   askDirector: (params: { agentId: string; divisionId: string; taskId?: string; question: string }) =>
     post("/questions", params),
+  /** A PM needs the director to create a named GitHub repo before it starts development on a project task. */
+  requestGithubRepo: (params: { agentId: string; divisionId: string; taskId?: string; repoName: string; reason?: string }) =>
+    post("/questions/repo-request", params),
 };

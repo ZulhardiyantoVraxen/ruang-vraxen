@@ -34,4 +34,9 @@ export class ObjectStorageService {
       return null;
     }
   }
+
+  /** Writes a small JSON marker object by its own key (see getJson). */
+  putJson<T>(key: string, data: T) {
+    return this.client.putObject(key, JSON.stringify(data), "application/json");
+  }
 }
