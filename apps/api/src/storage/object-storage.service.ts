@@ -39,4 +39,14 @@ export class ObjectStorageService {
   putJson<T>(key: string, data: T) {
     return this.client.putObject(key, JSON.stringify(data), "application/json");
   }
+
+  /** Director-uploaded files of any type (chat/command attachments) - stored verbatim under `uploads/<id>`. */
+  putUpload(key: string, buffer: Buffer, contentType: string) {
+    return this.client.putObject(key, buffer, contentType);
+  }
+
+  /** Reads an uploaded file back with its original Content-Type, for streaming it out via GET /uploads/:id. */
+  getObjectWithMeta(key: string) {
+    return this.client.getObjectWithMeta(key);
+  }
 }

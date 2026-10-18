@@ -11,6 +11,6 @@ export class ChatController {
   }
 
   @Post() send(@Param("agentId") agentId: string, @Body() dto: SendChatMessageDto) {
-    return this.service.send(agentId, dto.message);
+    return this.service.send(agentId, dto.message, dto.attachmentId);
   }
 }

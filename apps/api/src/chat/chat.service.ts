@@ -3,6 +3,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { OpenRouterService } from "../model-routing/openrouter.service";
 import { TasksService } from "../tasks/tasks.service";
 import { UsageService } from "../usage/usage.service";
+import { UploadsService } from "../uploads/uploads.service";
 
 type ChatResult =
   | { type: "chat"; reply: string }
@@ -31,19 +32,30 @@ export class ChatService {
     private readonly modelRouting: OpenRouterService,
     private readonly tasks: TasksService,
     private readonly usage: UsageService,
+    private readonly uploads: UploadsService,
   ) {}
 
   history(agentId: string) {
     return this.prisma.chatMessage.findMany({ where: { agentId }, orderBy: { createdAt: "asc" } });
   }
 
-  async send(agentId: string, message: string): Promise<ChatResult> {
+  /**
+   * `attachmentId` is the id POST /uploads returned - "di semua menu chat
+   * ada file upload". The thread itself only ever shows a short reference
+   * line (so old conversations don't balloon in size), but the model call
+   * for THIS turn gets the attachment's full content injected (text-like
+   * files read verbatim, anything else just described) - the same way an
+   * attachment shows up inline in a Claude conversation.
+   */
+  async send(agentId: string, message: string, attachmentId?: string): Promise<ChatResult> {
     const agent = await this.prisma.agent.findUniqueOrThrow({
       where: { id: agentId },
       include: { agentRole: { include: { modelClass: true, division: true } } },
     });
 
-    await this.prisma.chatMessage.create({ data: { agentId, role: "DIRECTOR", content: message } });
+    const attachmentNote = attachmentId ? `\n\n📎 Lampiran: ${this.uploads.filenameFromId(attachmentId)} (/uploads/${attachmentId})` : "";
+    const storedMessage = `${message}${attachmentNote}`;
+    await this.prisma.chatMessage.create({ data: { agentId, role: "DIRECTOR", content: storedMessage } });
 
     const recent = await this.prisma.chatMessage.findMany({
       where: { agentId },
@@ -51,6 +63,8 @@ export class ChatService {
       take: 20,
     });
     const history = recent.reverse(); // oldest first, includes the message we just stored
+
+    const attachmentForModel = attachmentId ? await this.uploads.describeForPrompt(attachmentId) : null;
 
     const systemPrompt = `Kamu adalah ${agent.displayName}, ${agent.agentRole.name} di divisi ${agent.agentRole.division.name}.${
       agent.agentRole.responsibilities ? ` Tanggung jawabmu: ${agent.agentRole.responsibilities}.` : ""
@@ -70,12 +84,16 @@ Jangan pernah mencampur teks biasa dengan JSON dalam satu balasan.`;
 
     let content: string, tokensIn: number, tokensOut: number;
     try {
+      const messagesForModel = history.map((m: { role: string; content: string }, i: number) => ({
+        role: (m.role === "DIRECTOR" ? "user" : "assistant") as "user" | "assistant",
+        // The last entry is the message we just stored above - swap in the
+        // attachment's full content for the model call only (the thread
+        // itself keeps the short reference line, see storedMessage above).
+        content: attachmentForModel && i === history.length - 1 ? `${message}\n\n${attachmentForModel}` : m.content,
+      }));
       const result = await this.modelRouting.chat(route.modelId, [
         { role: "system", content: systemPrompt },
-        ...history.map((m: { role: string; content: string }) => ({
-          role: (m.role === "DIRECTOR" ? "user" : "assistant") as "user" | "assistant",
-          content: m.content,
-        })),
+        ...messagesForModel,
       ]);
       content = result.content;
       tokensIn = result.tokensIn;

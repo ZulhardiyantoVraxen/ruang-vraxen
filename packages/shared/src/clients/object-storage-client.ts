@@ -80,4 +80,17 @@ export class ObjectStorageClient {
     for await (const chunk of res.Body as AsyncIterable<Buffer>) chunks.push(Buffer.from(chunk));
     return Buffer.concat(chunks);
   }
+
+  /**
+   * Same as getObjectBuffer, but also hands back the ContentType that was
+   * set at upload time - needed to stream a director-uploaded file (any
+   * type) back out with the right Content-Type header instead of guessing
+   * from the filename extension.
+   */
+  async getObjectWithMeta(key: string): Promise<{ buffer: Buffer; contentType: string | null }> {
+    const res = await this.s3.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
+    const chunks: Buffer[] = [];
+    for await (const chunk of res.Body as AsyncIterable<Buffer>) chunks.push(Buffer.from(chunk));
+    return { buffer: Buffer.concat(chunks), contentType: res.ContentType ?? null };
+  }
 }

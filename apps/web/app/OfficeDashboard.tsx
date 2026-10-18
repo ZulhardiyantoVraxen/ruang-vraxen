@@ -318,6 +318,28 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
   const [addingPersonnel, setAddingPersonnel] = useState(false);
   const [addPersonnelError, setAddPersonnelError] = useState<string | null>(null);
 
+  // "Di semua menu chat ada file upload, bisa berupa apapun" - shared
+  // attach-then-send pattern: picking a file uploads it immediately (via
+  // api.uploadFile) and the returned id/filename sits here until the next
+  // message is sent, same as attaching a file in a Claude conversation.
+  type PendingAttachment = { id: string; filename: string };
+  const [modalAttachment, setModalAttachment] = useState<PendingAttachment | null>(null);
+  const [modalUploading, setModalUploading] = useState(false);
+  const [commandAttachment, setCommandAttachment] = useState<PendingAttachment | null>(null);
+  const [commandUploading, setCommandUploading] = useState(false);
+
+  async function uploadAttachment(file: File, setUploading: (v: boolean) => void, setAttachment: (a: PendingAttachment | null) => void) {
+    setUploading(true);
+    try {
+      const res = await api.uploadFile(file);
+      setAttachment({ id: res.id, filename: res.filename });
+    } catch {
+      // Upload failed - just leave no attachment rather than blocking the chat/perintah box.
+    } finally {
+      setUploading(false);
+    }
+  }
+
   async function addPersonnel() {
     if (!selectedDivision) return;
     const roleName = newRoleName.trim();
@@ -344,6 +366,7 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
   }, [selectedDivisionSlug]);
 
   useEffect(() => {
+    setModalAttachment(null);
     if (!selected) {
       setModalChat([]);
       return;
@@ -391,11 +414,17 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
     const message = modalCommandText.trim();
     if (!message || modalCommandSending) return;
     setModalCommandSending(true);
-    const optimistic: ChatLine = { id: `pending-${Date.now()}`, role: "DIRECTOR", content: message };
+    const attachment = modalAttachment;
+    const optimistic: ChatLine = {
+      id: `pending-${Date.now()}`,
+      role: "DIRECTOR",
+      content: attachment ? `${message}\n\n📎 Lampiran: ${attachment.filename}` : message,
+    };
     setModalChat((prev) => [...prev, optimistic]);
     setModalCommandText("");
+    setModalAttachment(null);
     try {
-      const result = await api.agentChat(selected.id, message);
+      const result = await api.agentChat(selected.id, message, attachment?.id);
       if (result.type === "task") {
         setModalChat((prev) => [...prev, { id: `${optimistic.id}-reply`, role: "AGENT", content: result.note }]);
         // A real Task was created - refresh so "Tugas" list and the office/board reflect it.
@@ -429,6 +458,7 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
           instruction,
           projectId: commandProjectId || undefined,
           dueAt: commandDueAt ? new Date(commandDueAt).toISOString() : undefined,
+          attachmentId: commandAttachment?.id,
         });
         setCommandResult(result);
       } else {
@@ -443,12 +473,14 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
           description: instruction,
           projectId: commandProjectId || undefined,
           dueAt: commandDueAt ? new Date(commandDueAt).toISOString() : undefined,
+          attachmentId: commandAttachment?.id,
         });
         setCommandResult({ dispatched: [{ agentId: "pusat", agentName: "Chief of Staff (ditriase otomatis)" }], failed: [] });
       }
       setCommandText("");
       setCommandDueAt("");
       setCommandSelected(new Set());
+      setCommandAttachment(null);
       // Poll right away so the office visibly reacts instead of waiting for
       // the next 4s tick.
       api.listDivisions().then(setDivisions).catch(() => {});
@@ -766,6 +798,29 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
                     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) sendCommand();
                   }}
                 />
+                <div className={styles.miniRow} style={{ alignItems: "center" }}>
+                  <label className={styles.miniAddButton} style={{ cursor: "pointer" }}>
+                    📎 {commandUploading ? "Mengunggah…" : "Lampirkan file"}
+                    <input
+                      type="file"
+                      style={{ display: "none" }}
+                      disabled={commandUploading}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) uploadAttachment(file, setCommandUploading, setCommandAttachment);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                  {commandAttachment && (
+                    <span className={styles.chipLabel}>
+                      {commandAttachment.filename}{" "}
+                      <button type="button" onClick={() => setCommandAttachment(null)} style={{ background: "none", border: "none", color: "inherit", cursor: "pointer" }}>
+                        ✕
+                      </button>
+                    </span>
+                  )}
+                </div>
                 <div className={styles.commandSendRow}>
                   <button
                     type="button"
@@ -955,7 +1010,28 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
                 </div>
               ))}
             </div>
+            {modalAttachment && (
+              <p className={styles.modalChatHint} style={{ marginBottom: 4 }}>
+                📎 {modalAttachment.filename}{" "}
+                <button type="button" onClick={() => setModalAttachment(null)} style={{ background: "none", border: "none", color: "inherit", cursor: "pointer", textDecoration: "underline" }}>
+                  hapus
+                </button>
+              </p>
+            )}
             <div className={styles.modalCommandRow}>
+              <label className={styles.modalCommandSend} style={{ cursor: "pointer" }}>
+                {modalUploading ? "…" : "📎"}
+                <input
+                  type="file"
+                  style={{ display: "none" }}
+                  disabled={modalUploading}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) uploadAttachment(file, setModalUploading, setModalAttachment);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
               <input
                 className={styles.modalCommandInput}
                 placeholder={`Chat dengan ${selected.displayName}…`}
@@ -981,6 +1057,7 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
               onClick={() => {
                 setSelected(null);
                 setModalCommandText("");
+                setModalAttachment(null);
               }}
             >
               Tutup

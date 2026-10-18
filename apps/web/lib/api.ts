@@ -42,6 +42,7 @@ export const api = {
     requiresApproval?: boolean;
     projectId?: string;
     dueAt?: string;
+    attachmentId?: string;
   }) => request<any>("/tasks", { method: "POST", body: JSON.stringify(payload) }),
   /**
    * "Perintah sekaligus" - one instruction, fanned out to any number of
@@ -49,7 +50,7 @@ export const api = {
    * and the director's order is reserved to start the instant they free up
    * - never silently dropped.
    */
-  broadcastCommand: (payload: { agentIds: string[]; instruction: string; projectId?: string; dueAt?: string }) =>
+  broadcastCommand: (payload: { agentIds: string[]; instruction: string; projectId?: string; dueAt?: string; attachmentId?: string }) =>
     request<{
       dispatched: { agentId: string; agentName: string; taskId: string; queued: boolean }[];
       failed: { agentId: string; agentName: string; reason: string }[];
@@ -60,13 +61,28 @@ export const api = {
    * Plain conversation with one agent - the API classifies the message and
    * only creates a real Task (see `result.type === "task"`) when it reads
    * as an actual work order, so ordinary chat never shows up on the Task
-   * Board.
+   * Board. `attachmentId` comes from `uploadFile` below - "di semua menu
+   * chat ada file upload, bisa berupa apapun".
    */
-  agentChat: (agentId: string, message: string) =>
+  agentChat: (agentId: string, message: string, attachmentId?: string) =>
     request<
       | { type: "chat"; reply: string }
       | { type: "task"; taskId: string; title: string; queued: boolean; note: string }
-    >(`/agents/${agentId}/chat`, { method: "POST", body: JSON.stringify({ message }) }),
+    >(`/agents/${agentId}/chat`, { method: "POST", body: JSON.stringify({ message, attachmentId }) }),
+  /**
+   * Uploads a file of any type to the shared attachment store and returns
+   * its id - pass that id as `attachmentId` to agentChat/createTask/
+   * broadcastCommand to fold it into that message. Text-like files (txt,
+   * md, csv, json…) are read into the agent's context; anything else is
+   * still stored and downloadable via the returned `url`, just not parsed.
+   */
+  uploadFile: async (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`${BASE}/uploads`, { method: "POST", body: form });
+    if (!res.ok) throw new Error(`API /uploads failed: ${res.status}`);
+    return res.json() as Promise<{ id: string; filename: string; mimeType: string; size: number; url: string }>;
+  },
   createProject: (name: string, description?: string) =>
     request<any>("/projects", { method: "POST", body: JSON.stringify({ name, description }) }),
   /**

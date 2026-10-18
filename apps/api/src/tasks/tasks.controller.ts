@@ -3,21 +3,31 @@ import type { Response } from "express";
 import { TasksService } from "./tasks.service";
 import { BroadcastCommandDto, CreateTaskDto, TriageTaskDto } from "./dto";
 import { ObjectStorageService } from "../storage/object-storage.service";
+import { UploadsService } from "../uploads/uploads.service";
 
 @Controller("tasks")
 export class TasksController {
   constructor(
     private readonly service: TasksService,
     private readonly storage: ObjectStorageService,
+    private readonly uploads: UploadsService,
   ) {}
 
-  @Post() create(@Body() dto: CreateTaskDto) {
-    return this.service.create(dto);
+  /** Folds an attachment's content (or a reference to it) into free text before it becomes a Task's description/instruction - "di semua menu chat ada file upload". */
+  private async withAttachment(text: string, attachmentId?: string): Promise<string> {
+    if (!attachmentId) return text;
+    return `${text}\n\n${await this.uploads.describeForPrompt(attachmentId)}`;
+  }
+
+  @Post() async create(@Body() dto: CreateTaskDto) {
+    const description = await this.withAttachment(dto.description ?? "", dto.attachmentId);
+    return this.service.create({ ...dto, description: description || undefined });
   }
 
   /** "Perintah sekaligus" from the office view - one instruction, several agents at once. */
-  @Post("broadcast") broadcast(@Body() dto: BroadcastCommandDto) {
-    return this.service.broadcast(dto);
+  @Post("broadcast") async broadcast(@Body() dto: BroadcastCommandDto) {
+    const instruction = await this.withAttachment(dto.instruction, dto.attachmentId);
+    return this.service.broadcast({ ...dto, instruction });
   }
 
   /** Auditor's daily chase - called once a day by the VPS's own crontab (see infra/). */
