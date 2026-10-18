@@ -183,7 +183,7 @@ async function runFinanceExecutor(
 
   const objectKey = await objectStorage.putTaskOutput(task.id, "executor-output.md", summaryLines, "text/markdown");
   await storeAsPdf(task.id, task.title, summaryLines);
-  await createBudgetSheetIfConfigured(task.id, project?.name ?? task.title, parsed, total);
+  await createBudgetSheetIfConfigured(task.id, task.projectId, project?.name ?? null, parsed, total);
 
   const summary = summaryLines.length > 500 ? `${summaryLines.slice(0, 500)}…` : summaryLines;
   await apiClient.recordResult(task.id, summary, objectKey);
@@ -193,24 +193,61 @@ async function runFinanceExecutor(
 }
 
 /**
- * Creates the actual Google Sheet for a Finance budget task and drops the
- * same marker-file pattern as commitCodeIfPresent's github-output.json - the
- * Archive page already reads `${taskId}/drive-output.json`, so no apps/api
- * or apps/web change is needed for the link to show up there. Best-effort:
- * with no GOOGLE_* env vars set yet, this silently skips (budget numbers are
- * still recorded as the task result either way).
+ * Finds (or creates, first time only) the Drive subfolder for a Project
+ * under the director's single "Semua Project" root folder - "di folder 2
+ * wajib buat folder baru untuk setiap projectnya". The resulting folder id
+ * is cached via the same marker-file pattern as the GitHub repo marker
+ * (`project/${projectId}/drive-folder.json`) so repeat budget tasks for the
+ * same project reuse one folder instead of creating a new one every time.
+ */
+async function getOrCreateProjectDriveFolder(
+  sheets: GoogleSheetsClient,
+  projectId: string,
+  projectName: string,
+  rootFolderId: string,
+): Promise<string> {
+  const key = `project/${projectId}/drive-folder.json`;
+  if (await objectStorage.exists(key)) {
+    const buffer = await objectStorage.getObjectBuffer(key);
+    const data = JSON.parse(buffer.toString("utf-8")) as { folderId: string };
+    if (data.folderId) return data.folderId;
+  }
+
+  let folderId = await sheets.findFolderByName(projectName, rootFolderId);
+  if (!folderId) folderId = await sheets.createFolder(projectName, rootFolderId);
+
+  await objectStorage.putObject(
+    key,
+    JSON.stringify({ folderId, createdAt: new Date().toISOString() }),
+    "application/json",
+  );
+  return folderId;
+}
+
+/**
+ * Creates the actual Google Sheet for a Finance budget task, inside that
+ * project's own Drive subfolder, and drops the same marker-file pattern as
+ * commitCodeIfPresent's github-output.json - the Archive page already reads
+ * `${taskId}/drive-output.json`, so no apps/api or apps/web change is needed
+ * for the link to show up there. Best-effort: with no GOOGLE_* env vars set
+ * yet, or no project attached to the task, this silently skips (budget
+ * numbers are still recorded as the task result either way).
  */
 async function createBudgetSheetIfConfigured(
   taskId: string,
-  sheetTitleSuffix: string,
+  projectId: string | null,
+  projectName: string | null,
   budget: { phases: { name: string; amount: number }[]; notes?: string },
   total: number,
 ) {
-  const { serviceAccountEmail, privateKey, driveFolderId } = config.google;
-  if (!serviceAccountEmail || !privateKey || !driveFolderId) return;
+  const { serviceAccountEmail, privateKey, projectsRootFolderId } = config.google;
+  if (!serviceAccountEmail || !privateKey || !projectsRootFolderId) return;
+  if (!projectId || !projectName) return; // no project to file the sheet under - nothing to create
 
   try {
-    const sheets = new GoogleSheetsClient({ clientEmail: serviceAccountEmail, privateKey, driveFolderId });
+    const sheets = new GoogleSheetsClient({ clientEmail: serviceAccountEmail, privateKey });
+    const folderId = await getOrCreateProjectDriveFolder(sheets, projectId, projectName, projectsRootFolderId);
+
     const rows: (string | number)[][] = [
       ["Fase", "Nominal (Rp)"],
       ...budget.phases.map((p) => [p.name, Number(p.amount) || 0]),
@@ -218,11 +255,11 @@ async function createBudgetSheetIfConfigured(
     ];
     if (budget.notes) rows.push([], ["Catatan", budget.notes]);
 
-    const sheet = await sheets.createBudgetSheet(`Budget - ${sheetTitleSuffix}`, rows);
+    const sheet = await sheets.createSpreadsheet(`Budget - ${projectName}`, rows, folderId);
     await objectStorage.putTaskOutput(
       taskId,
       "drive-output.json",
-      JSON.stringify({ url: sheet.url, spreadsheetId: sheet.spreadsheetId, createdAt: new Date().toISOString() }),
+      JSON.stringify({ url: sheet.url, spreadsheetId: sheet.spreadsheetId, folderId, createdAt: new Date().toISOString() }),
       "application/json",
     );
   } catch (err) {

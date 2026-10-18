@@ -32,14 +32,20 @@ export const config = {
     owner: process.env.GITHUB_OWNER ?? "",
     repo: process.env.GITHUB_REPO ?? "",
   },
-  // "Finance membuat dokumen per project di Google Sheets" - optional, same
+  // "Finance membuat dokumen per project di Google Sheets ... di folder 2
+  // wajib buat folder baru untuk setiap projectnya" - optional, same
   // fail-open philosophy as `github` above: with no service account
   // configured yet, budget calculation still works, just skips creating the
   // actual spreadsheet (and apps/web's Archive keeps showing no Drive link).
+  // `projectsRootFolderId` is the single "Semua Project" folder the director
+  // shared with the service account - one subfolder gets created under it
+  // per Project (auto, no director confirmation needed - unlike the GitHub
+  // repo flow, creating a Drive folder isn't a manual action only a human
+  // can do), and each project's budget sheet lands inside its own subfolder.
   google: {
     serviceAccountEmail: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
     privateKey: process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY,
-    driveFolderId: process.env.GOOGLE_DRIVE_FOLDER_ID,
+    projectsRootFolderId: process.env.GOOGLE_DRIVE_PROJECTS_ROOT_FOLDER_ID,
   },
 };
 

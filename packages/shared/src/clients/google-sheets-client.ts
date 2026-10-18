@@ -18,15 +18,13 @@ import { createSign } from "node:crypto";
 export class GoogleSheetsClient {
   private readonly clientEmail: string;
   private readonly privateKey: string;
-  private readonly driveFolderId: string;
   private cachedToken: { token: string; expiresAt: number } | null = null;
 
-  constructor(config: { clientEmail: string; privateKey: string; driveFolderId: string }) {
+  constructor(config: { clientEmail: string; privateKey: string }) {
     this.clientEmail = config.clientEmail;
     // .env stores the PEM with literal "\n" sequences (real newlines aren't
     // valid in a single env var line) - undo that before handing it to crypto.
     this.privateKey = config.privateKey.includes("\\n") ? config.privateKey.replace(/\\n/g, "\n") : config.privateKey;
-    this.driveFolderId = config.driveFolderId;
   }
 
   private base64url(input: Buffer | string): string {
@@ -63,11 +61,42 @@ export class GoogleSheetsClient {
     return body.access_token;
   }
 
+  /** Returns the id of an existing child folder of `parentFolderId` named exactly `name`, or null if none exists yet. */
+  async findFolderByName(name: string, parentFolderId: string): Promise<string | null> {
+    const token = await this.getAccessToken();
+    const q = encodeURIComponent(
+      `name='${name.replace(/'/g, "\\'")}' and '${parentFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+    );
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error(`Google Drive cari folder gagal (${res.status}): ${await res.text()}`);
+    const body = (await res.json()) as { files?: { id: string }[] };
+    return body.files?.[0]?.id ?? null;
+  }
+
+  /** Creates a new subfolder named `name` directly inside `parentFolderId` (e.g. "Semua Project" -> one folder per project) and returns its id. */
+  async createFolder(name: string, parentFolderId: string): Promise<string> {
+    const token = await this.getAccessToken();
+    const res = await fetch("https://www.googleapis.com/drive/v3/files?fields=id", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ name, mimeType: "application/vnd.google-apps.folder", parents: [parentFolderId] }),
+    });
+    if (!res.ok) throw new Error(`Google Drive buat folder gagal (${res.status}): ${await res.text()}`);
+    const body = (await res.json()) as { id: string };
+    return body.id;
+  }
+
   /**
-   * Creates a new spreadsheet with one sheet of `rows`, moves it into the
-   * shared budget folder, and returns its id + editable Drive URL.
+   * Creates a new spreadsheet with one sheet of `rows`, moves it into
+   * `parentFolderId`, and returns its id + editable Drive URL.
    */
-  async createBudgetSheet(title: string, rows: (string | number)[][]): Promise<{ spreadsheetId: string; url: string }> {
+  async createSpreadsheet(
+    title: string,
+    rows: (string | number)[][],
+    parentFolderId: string,
+  ): Promise<{ spreadsheetId: string; url: string }> {
     const token = await this.getAccessToken();
     const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 
@@ -90,7 +119,7 @@ export class GoogleSheetsClient {
     // (invisible-to-humans) My Drive - move it into the folder the director
     // already shared with the service account so it shows up for them too.
     const moveRes = await fetch(
-      `https://www.googleapis.com/drive/v3/files/${spreadsheetId}?addParents=${this.driveFolderId}&removeParents=root&fields=id,parents`,
+      `https://www.googleapis.com/drive/v3/files/${spreadsheetId}?addParents=${parentFolderId}&removeParents=root&fields=id,parents`,
       { method: "PATCH", headers: { Authorization: `Bearer ${token}` } },
     );
     if (!moveRes.ok) throw new Error(`Google Drive pindah folder gagal (${moveRes.status}): ${await moveRes.text()}`);
