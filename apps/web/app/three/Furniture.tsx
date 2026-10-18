@@ -183,6 +183,62 @@ export function GalonDispenser({ position = [0, 0, 0], rotation = 0 }: { positio
   );
 }
 
+/** A straight wall segment between two points, with a slim cap on top - adapted from ruang's Wall(). */
+export function Wall({ from, to, height = 2.4 }: { from: [number, number]; to: [number, number]; height?: number }) {
+  const [x1, z1] = from;
+  const [x2, z2] = to;
+  const length = Math.hypot(x2 - x1, z2 - z1);
+  const angle = Math.atan2(z2 - z1, x2 - x1);
+  const thick = 0.18;
+  return (
+    <group position={[(x1 + x2) / 2, 0, (z1 + z2) / 2]} rotation={[0, -angle, 0]}>
+      <RBox position={[0, height / 2, 0]} size={[length + thick, height, thick]} radius={0.02} color="#efe6d6" roughness={0.9} />
+      <RBox position={[0, height + 0.02, 0]} size={[length + thick + 0.02, 0.05, thick + 0.04]} radius={0.01} color="#d9cdb8" />
+    </group>
+  );
+}
+
+/** A glass pane along x = const, from `bottom` up to `top` - a room divider you can see through. */
+export function GlassPanel({ x, fromZ, toZ, bottom = 0.9, top = 2.2 }: { x: number; fromZ: number; toZ: number; bottom?: number; top?: number }) {
+  return (
+    <RBox
+      position={[x, (bottom + top) / 2, (fromZ + toZ) / 2]}
+      size={[0.05, top - bottom, Math.abs(toZ - fromZ)]}
+      radius={0.01}
+      color="#cfe8ee"
+      opacity={0.25}
+      roughness={0.05}
+      shadow={false}
+    />
+  );
+}
+
+export function LongTable({ position = [0, 0, 0], length = 4 }: { position?: Vec3; length?: number }) {
+  return (
+    <Group position={position}>
+      <RBox position={[0, 0.74, 0]} size={[length, 0.07, 1.1]} radius={0.03} color="#8a5a3a" roughness={0.5} />
+      {[-length / 2 + 0.3, length / 2 - 0.3].map((x) => (
+        <group key={x}>
+          <Cyl position={[x, 0.37, -0.45]} radius={0.04} height={0.74} color="#2a2f33" />
+          <Cyl position={[x, 0.37, 0.45]} radius={0.04} height={0.74} color="#2a2f33" />
+        </group>
+      ))}
+    </Group>
+  );
+}
+
+export function Television({ position = [0, 0, 0] }: { position?: Vec3 }) {
+  return (
+    <Group position={position}>
+      <RBox position={[0, 0, 0]} size={[1.5, 0.85, 0.06]} radius={0.02} color="#17191c" roughness={0.3} />
+      <mesh position={[0, 0, 0.035]}>
+        <planeGeometry args={[1.38, 0.74]} />
+        <meshStandardMaterial color="#1a3a44" emissive="#2d6c7a" emissiveIntensity={0.4} roughness={0.2} />
+      </mesh>
+    </Group>
+  );
+}
+
 export function PantryCounter({ position = [0, 0, 0], rotation = 0 }: { position?: Vec3; rotation?: number }) {
   return (
     <group>
