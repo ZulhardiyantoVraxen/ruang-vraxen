@@ -114,6 +114,15 @@
   min-height: 0;
 }
 
+/* "Direktur punya hak penuh untuk mempercepat progress" - dragging a card
+   over another column highlights it as a valid drop target. */
+.columnBodyDragOver {
+  background: rgba(95, 201, 184, 0.08);
+  outline: 2px dashed rgba(95, 201, 184, 0.45);
+  outline-offset: -4px;
+  border-radius: 8px;
+}
+
 .columnEmpty {
   font-size: 11.5px;
   color: #4f6070;
@@ -127,6 +136,11 @@
   background: #0b141f;
   padding: 10px 11px;
   animation: cardIn 0.2s ease both;
+  cursor: grab;
+}
+
+.cardDragging {
+  opacity: 0.4;
 }
 
 @keyframes cardIn {

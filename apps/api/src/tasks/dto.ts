@@ -1,4 +1,19 @@
-import { ArrayMinSize, IsArray, IsBoolean, IsDateString, IsInt, IsOptional, IsString, Min } from "class-validator";
+import { ArrayMinSize, IsArray, IsBoolean, IsDateString, IsIn, IsInt, IsOptional, IsString, Min } from "class-validator";
+
+export const OVERRIDABLE_TASK_STATUSES = [
+  "TRIAGE",
+  "TODO",
+  "SCHEDULED",
+  "READY",
+  "RUNNING",
+  "BLOCKED",
+  "REVIEW",
+  "APPROVAL_PENDING",
+  "AWAITING_DIRECTOR",
+  "DONE",
+  "REJECTED",
+] as const;
+export type OverridableTaskStatus = (typeof OVERRIDABLE_TASK_STATUSES)[number];
 
 export class CreateTaskDto {
   @IsString() divisionSlug!: string;
@@ -43,4 +58,15 @@ export class BroadcastCommandDto {
   @IsOptional() @IsDateString() dueAt?: string;
   /** Id returned by POST /uploads - appended to the instruction before dispatch. */
   @IsOptional() @IsString() attachmentId?: string;
+}
+
+/**
+ * "Kanban saya pengen bisa geser sendiri, Direktur punya hak penuh untuk
+ * mempercepat progress" - dragging a card to another column force-sets the
+ * task's status directly, bypassing whatever stage the normal pipeline
+ * (executor -> QA -> approval) would otherwise require. FAILED is
+ * deliberately excluded - that's a system error state, not a kanban column.
+ */
+export class OverrideTaskStatusDto {
+  @IsIn(OVERRIDABLE_TASK_STATUSES) status!: OverridableTaskStatus;
 }

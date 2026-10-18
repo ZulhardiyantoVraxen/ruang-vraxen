@@ -45,6 +45,14 @@ export const api = {
     attachmentId?: string;
   }) => request<any>("/tasks", { method: "POST", body: JSON.stringify(payload) }),
   /**
+   * "Kanban saya pengen bisa geser sendiri, Direktur punya hak penuh untuk
+   * mempercepat progress" - drag-and-drop on the Task Board calls this to
+   * force a card straight into whatever column it was dropped on, skipping
+   * whatever stage the normal executor/QA/approval pipeline would require.
+   */
+  overrideTaskStatus: (taskId: string, status: string) =>
+    request<any>(`/tasks/${taskId}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
+  /**
    * "Perintah sekaligus" - one instruction, fanned out to any number of
    * agents at once. `queued: true` in the result means the agent was busy
    * and the director's order is reserved to start the instant they free up

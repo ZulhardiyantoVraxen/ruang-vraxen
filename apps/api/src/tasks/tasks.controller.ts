@@ -1,7 +1,7 @@
 import { Body, Controller, Get, NotFoundException, Param, Patch, Post, Res } from "@nestjs/common";
 import type { Response } from "express";
 import { TasksService } from "./tasks.service";
-import { BroadcastCommandDto, CreateTaskDto, TriageTaskDto } from "./dto";
+import { BroadcastCommandDto, CreateTaskDto, OverrideTaskStatusDto, TriageTaskDto } from "./dto";
 import { ObjectStorageService } from "../storage/object-storage.service";
 import { UploadsService } from "../uploads/uploads.service";
 
@@ -22,6 +22,15 @@ export class TasksController {
   @Post() async create(@Body() dto: CreateTaskDto) {
     const description = await this.withAttachment(dto.description ?? "", dto.attachmentId);
     return this.service.create({ ...dto, description: description || undefined });
+  }
+
+  /**
+   * "Kanban saya pengen bisa geser sendiri, Direktur punya hak penuh untuk
+   * mempercepat progress" - drag-and-drop on the Task Board calls this to
+   * force a card into whatever column the director dropped it on.
+   */
+  @Patch(":id/status") overrideStatus(@Param("id") id: string, @Body() dto: OverrideTaskStatusDto) {
+    return this.service.overrideStatus(id, dto.status);
   }
 
   /** "Perintah sekaligus" from the office view - one instruction, several agents at once. */

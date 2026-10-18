@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import styles from "./taskBoard.module.css";
 import { api } from "../../lib/api";
 import ExpandableText from "../components/ExpandableText";
@@ -55,8 +55,28 @@ function isOverdue(dueAt: string, status: string) {
  * Division so a project "in flight" is actually visible as one thread
  * instead of tasks just sitting in their own division's column.
  */
+// Flattens /divisions into the Task Board's shape - mirrors tasks/page.tsx's
+// server-side transform exactly, so client-side polling refreshes stay
+// consistent with the initial server render.
+function flattenTasks(divisions: any[]): Task[] {
+  return divisions
+    .filter((d) => d.slug !== "pusat")
+    .flatMap((d) =>
+      (d.tasks ?? []).map((t: any) => {
+        const executor = (t.assignments ?? []).filter((a: any) => a.role === "EXECUTOR").slice(-1)[0];
+        return {
+          ...t,
+          divisionName: d.name,
+          divisionId: d.id,
+          picName: executor?.agent?.displayName ?? null,
+          projectName: t.project?.name ?? null,
+        };
+      }),
+    );
+}
+
 export default function TaskBoard({
-  tasks,
+  tasks: initialTasks,
   divisions,
   projects,
 }: {
@@ -64,8 +84,45 @@ export default function TaskBoard({
   divisions: DivisionOption[];
   projects: ProjectOption[];
 }) {
+  const [tasks, setTasks] = useState(initialTasks);
   const [divisionFilter, setDivisionFilter] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragOverCol, setDragOverCol] = useState<string | null>(null);
+  const [moveError, setMoveError] = useState<string | null>(null);
+
+  // Keep the board live without the director needing to refresh - same
+  // polling pattern OfficeDashboard already uses for /divisions.
+  useEffect(() => {
+    const id = setInterval(() => {
+      api
+        .listDivisions()
+        .then((divs) => setTasks(flattenTasks(divs)))
+        .catch(() => {});
+    }, 5000);
+    return () => clearInterval(id);
+  }, []);
+
+  /**
+   * "Kanban saya pengen bisa geser sendiri, Direktur punya hak penuh untuk
+   * mempercepat progress" - dropping a card on a column force-sets that
+   * task's status via the admin override endpoint. Optimistic: the card
+   * jumps immediately, and reverts if the API call fails.
+   */
+  async function moveTask(taskId: string, targetStatus: string) {
+    const previous = tasks;
+    const current = tasks.find((t) => t.id === taskId);
+    if (!current || current.status === targetStatus) return;
+    setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, status: targetStatus } : t)));
+    setMoveError(null);
+    try {
+      await api.overrideTaskStatus(taskId, targetStatus);
+    } catch {
+      setTasks(previous);
+      setMoveError("Gagal memindahkan task. Coba lagi.");
+      setTimeout(() => setMoveError(null), 4000);
+    }
+  }
 
   const filtered = useMemo(() => {
     return tasks.filter((t) => {
@@ -99,7 +156,7 @@ export default function TaskBoard({
             ))}
           </select>
         </div>
-        <span className={styles.headerCount}>{total} task</span>
+        <span className={styles.headerCount}>{moveError ?? `${total} task`}</span>
       </div>
 
       <div className={styles.board}>
@@ -114,10 +171,37 @@ export default function TaskBoard({
                 <span className={styles.columnTitle}>{col.label}</span>
                 <span className={styles.columnCount}>{colTasks.length}</span>
               </div>
-              <div className={styles.columnBody}>
+              <div
+                className={`${styles.columnBody} ${dragOverCol === col.key ? styles.columnBodyDragOver : ""}`}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDragOverCol(col.key);
+                }}
+                onDragLeave={() => setDragOverCol((prev) => (prev === col.key ? null : prev))}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDragOverCol(null);
+                  const taskId = e.dataTransfer.getData("text/plain") || draggingId;
+                  if (taskId) moveTask(taskId, col.statuses[0]);
+                  setDraggingId(null);
+                }}
+              >
                 {colTasks.length === 0 && <p className={styles.columnEmpty}>Kosong</p>}
                 {colTasks.map((t) => (
-                  <div key={t.id} className={styles.card}>
+                  <div
+                    key={t.id}
+                    className={`${styles.card} ${draggingId === t.id ? styles.cardDragging : ""}`}
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData("text/plain", t.id);
+                      e.dataTransfer.effectAllowed = "move";
+                      setDraggingId(t.id);
+                    }}
+                    onDragEnd={() => {
+                      setDraggingId(null);
+                      setDragOverCol(null);
+                    }}
+                  >
                     {t.projectName && <p className={styles.cardProject}>{t.projectName}</p>}
                     <p className={styles.cardDivision}>{t.divisionName}</p>
                     <p className={styles.cardTitle}>{t.title}</p>

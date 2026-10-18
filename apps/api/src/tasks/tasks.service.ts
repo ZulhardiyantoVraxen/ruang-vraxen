@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from "@nestjs/comm
 import { PrismaService } from "../prisma/prisma.service";
 import { KafkaService } from "../kafka/kafka.service";
 import { TOPICS } from "@platform/shared";
-import { BroadcastCommandDto, CreateTaskDto, TriageTaskDto } from "./dto";
+import { BroadcastCommandDto, CreateTaskDto, OverridableTaskStatus, TriageTaskDto } from "./dto";
 import { ROLE_NAMES } from "../common/role-names";
 import { ObjectStorageService } from "../storage/object-storage.service";
 
@@ -129,6 +129,41 @@ export class TasksService {
       data: { resultSummary: reason.slice(0, 500), status: "FAILED" },
     });
     await this.completeAssignment(taskId, "EXECUTOR");
+    return task;
+  }
+
+  /**
+   * "Kanban saya pengen bisa geser sendiri, Direktur punya hak penuh untuk
+   * mempercepat progress" - drags a card straight to any column, bypassing
+   * whatever stage the normal executor -> QA -> approval pipeline would
+   * otherwise require. This is an administrative override, not a replay of
+   * that pipeline: it force-sets Task.status and, only for the two genuinely
+   * terminal columns (DONE/REJECTED), does the cleanup the normal paths
+   * would have done - freeing any still-open assignment (so the agent's
+   * concurrency slot doesn't stay stuck "working" on a task the director
+   * just closed) and resolving any lingering PENDING Approval to match
+   * (the director's own drag already IS the decision). Any other move
+   * (back to TODO, straight to RUNNING, BLOCKED, ...) just changes the
+   * status field - no side effects, since it's a display/priority override,
+   * not a claim that the work actually happened at that stage.
+   */
+  async overrideStatus(taskId: string, status: OverridableTaskStatus) {
+    const task = await this.prisma.task.update({ where: { id: taskId }, data: { status } });
+
+    if (status === "DONE" || status === "REJECTED") {
+      await this.completeAssignment(taskId, "EXECUTOR");
+      await this.completeAssignment(taskId, "REVIEWER");
+      await this.prisma.approval.updateMany({
+        where: { taskId, status: "PENDING" },
+        data: { status: status === "DONE" ? "APPROVED" : "REJECTED", approverRef: "Direktur (geser kanban)", decidedAt: new Date() },
+      });
+    }
+
+    await this.kafka.publish(TOPICS.TASK_EVENTS, {
+      eventType: "task.status.overridden",
+      aggregateId: taskId,
+      payload: { status },
+    });
     return task;
   }
 
