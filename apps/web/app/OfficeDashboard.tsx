@@ -107,8 +107,14 @@ const ROOM_W = 369;
 const ROOM_H = 300;
 const GRID_GAP_X = 50;
 const GRID_GAP_Y = 60;
+// "Ruang Direktur" is not a Division from the API - it's a virtual room the
+// director can call any agent into, regardless of which division's room
+// they actually belong to. It sits next to Sekretariat Direksi at the top,
+// same width, so the top row's total width matches the 2x2 grid below.
+const DIRECTOR_ROOM_SLUG = "ruang-direktur";
 const FIXED_LAYOUT: Record<string, { x: number; y: number; w: number; h: number }> = {
-  pusat: { x: (ROOM_W * 2 + GRID_GAP_X - ROOM_W) / 2, y: 0, w: ROOM_W, h: ROOM_H },
+  pusat: { x: 0, y: 0, w: ROOM_W, h: ROOM_H },
+  [DIRECTOR_ROOM_SLUG]: { x: ROOM_W + GRID_GAP_X, y: 0, w: ROOM_W, h: ROOM_H },
   software: { x: 0, y: ROOM_H + GRID_GAP_Y, w: ROOM_W, h: ROOM_H },
   konten: { x: ROOM_W + GRID_GAP_X, y: ROOM_H + GRID_GAP_Y, w: ROOM_W, h: ROOM_H },
   konstruksi: { x: 0, y: (ROOM_H + GRID_GAP_Y) * 2, w: ROOM_W, h: ROOM_H },
@@ -117,12 +123,14 @@ const FIXED_LAYOUT: Record<string, { x: number; y: number; w: number; h: number 
 
 const THEME: Record<string, { floor: string; floorDark: string }> = {
   pusat: { floor: "#8a6a3a", floorDark: "#5c4624" },
+  [DIRECTOR_ROOM_SLUG]: { floor: "#c9a13d", floorDark: "#8a6c22" },
   software: { floor: "#2f6a8f", floorDark: "#1d4259" },
   konten: { floor: "#9a4f78", floorDark: "#642f4c" },
   konstruksi: { floor: "#b06a2e", floorDark: "#71451f" },
   kesehatan: { floor: "#3e8a68", floorDark: "#275942" },
 };
 const FALLBACK_THEME = { floor: "#4a5a6a", floorDark: "#303c48" };
+const CALLED_AGENTS_STORAGE_KEY = "vraxen-office-ruang-direktur-called";
 
 const STATUS_COLOR: Record<string, string> = {
   WORKING: "#5fc9b8",
@@ -169,6 +177,9 @@ function clamp(n: number, min: number, max: number) {
 function computeLayout(divisions: Division[]) {
   const rects: Record<string, { x: number; y: number; w: number; h: number }> = {};
   let maxY = 0;
+  // Ruang Direktur is always present (not tied to a Division record).
+  rects[DIRECTOR_ROOM_SLUG] = FIXED_LAYOUT[DIRECTOR_ROOM_SLUG];
+  maxY = Math.max(maxY, FIXED_LAYOUT[DIRECTOR_ROOM_SLUG].y + FIXED_LAYOUT[DIRECTOR_ROOM_SLUG].h);
   for (const d of divisions) {
     if (FIXED_LAYOUT[d.slug]) {
       rects[d.slug] = FIXED_LAYOUT[d.slug];
@@ -208,6 +219,34 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
   const [rotation, setRotation] = useState(0);
   const [zoom, setZoom] = useState(0.72);
   const [dragStart, setDragStart] = useState<{ x: number; rotation: number } | null>(null);
+
+  // "Ada ruang direktur, jadi saya bisa panggil siapa saja untuk masuk ke
+  // ruang direktur" - a purely client-side roster of who the director has
+  // currently summoned, independent of which division they actually belong
+  // to. Kept in localStorage (per-browser convenience, not shared/durable
+  // state) so a refresh doesn't silently send everyone back to their desk.
+  const [calledAgentIds, setCalledAgentIds] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(CALLED_AGENTS_STORAGE_KEY);
+      if (raw) setCalledAgentIds(new Set(JSON.parse(raw)));
+    } catch {
+      // Private browsing / storage blocked - everyone just starts at their own desk.
+    }
+  }, []);
+  function toggleCalledToDirectorRoom(agentId: string) {
+    setCalledAgentIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(agentId)) next.delete(agentId);
+      else next.add(agentId);
+      try {
+        window.localStorage.setItem(CALLED_AGENTS_STORAGE_KEY, JSON.stringify(Array.from(next)));
+      } catch {
+        // Non-critical - the call still applies for this session even if it can't persist.
+      }
+      return next;
+    });
+  }
 
   // So that an agent given a command (or finishing one) visibly changes state -
   // walks to their desk, sits, types - without the person reloading the page.
@@ -421,7 +460,7 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
   return (
     <div className={styles.page}>
       <div className={styles.hud}>
-        <h1 className={styles.hudTitle}>Kantor Virtual</h1>
+        <h1 className={styles.hudTitle}>Vraxen Virtual Office</h1>
         <div className={styles.chip}>
           <span className={styles.chipValue}>{counts.total}</span>
           <span className={styles.chipLabel}>Agent</span>
@@ -467,7 +506,12 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
       <div className={styles.layoutRow}>
         {view === "3d" ? (
           <div className={styles.stage3d}>
-            <OfficeScene3D divisions={divisions} onSelectDivision={setSelectedDivisionSlug} selectedAgentIds={commandSelected} />
+            <OfficeScene3D
+              divisions={divisions}
+              onSelectDivision={setSelectedDivisionSlug}
+              selectedAgentIds={commandSelected}
+              calledAgentIds={calledAgentIds}
+            />
           </div>
         ) : (
         <div
@@ -487,13 +531,47 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
                 transform: `rotateX(55deg) rotateZ(${totalZ}deg) scale(${zoom})`,
               }}
             >
+              {(() => {
+                const rect = layout.rects[DIRECTOR_ROOM_SLUG];
+                if (!rect) return null;
+                const theme = THEME[DIRECTOR_ROOM_SLUG];
+                const calledAgents = allAgents.filter((a) => calledAgentIds.has(a.id));
+                return (
+                  <div className={styles.room} style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }}>
+                    <div className={styles.roomFloor} style={{ background: `linear-gradient(160deg, ${theme.floor}, ${theme.floorDark})` }} />
+                    <div className={styles.roomInner} style={{ transform: counterTransform }}>
+                      <div className={styles.roomLabel}>🏛 Ruang Direktur</div>
+                      <div className={styles.roomDesc}>Panggil siapa saja dari modal agent untuk masuk ke sini.</div>
+                      <div className={styles.roomTags}>
+                        {calledAgents.length === 0 && <p className={styles.empty}>Belum ada yang dipanggil.</p>}
+                        {calledAgents.map((a) => (
+                          <button
+                            key={a.id}
+                            type="button"
+                            className={styles.tag}
+                            onClick={() => setSelected(a)}
+                            title={`${a.displayName} · ${a.role}`}
+                          >
+                            <span className={styles.tagDot} style={{ background: STATUS_COLOR[a.status] ?? "#5b6b7a" }} />
+                            <span className={styles.tagText}>
+                              <span className={styles.tagName}>{a.displayName}</span>
+                              <br />
+                              <span className={styles.tagMeta}>{a.division} · dipanggil</span>
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
               {divisions.map((d) => {
                 const rect = layout.rects[d.slug];
                 if (!rect) return null;
                 const theme = THEME[d.slug] ?? FALLBACK_THEME;
-                const agents = d.agentRoles.flatMap((r) =>
-                  r.agents.map((a) => ({ ...a, role: r.name, division: d.name, tier: r.tier, requiresApproval: r.requiresApproval }))
-                );
+                const agents = d.agentRoles
+                  .flatMap((r) => r.agents.map((a) => ({ ...a, role: r.name, division: d.name, tier: r.tier, requiresApproval: r.requiresApproval })))
+                  .filter((a) => !calledAgentIds.has(a.id)); // currently in Ruang Direktur, not at their desk
                 return (
                   <div
                     key={d.id}
@@ -767,6 +845,14 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
               <span className={styles.statLabel}>Wajib approval</span>
               <span className={styles.statValue}>{selected.requiresApproval ? "Ya" : "Tidak"}</span>
             </div>
+
+            <button
+              type="button"
+              className={styles.callToDirectorRoomButton}
+              onClick={() => toggleCalledToDirectorRoom(selected.id)}
+            >
+              {calledAgentIds.has(selected.id) ? "↩ Kembalikan ke divisi" : "🏛 Panggil ke Ruang Direktur"}
+            </button>
 
             <p className={styles.modalSectionTitle}>Tugas {selected.displayName} ({selectedAgentTasks.length})</p>
             <div className={styles.taskList}>

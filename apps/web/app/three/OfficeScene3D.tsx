@@ -153,6 +153,8 @@ type AgentPlan = {
   homeSeat: Seat;
   idleTarget: { pos: THREE.Vector3; facing: number; kind: "sit" | "stand" };
   pmSeat: Seat | null;
+  /** Set when the director has summoned this agent (any division) into Ruang Direktur - overrides every other state below. */
+  directorSeat: Seat | null;
 };
 
 /** A pulsing ring under an agent picked in the "Perintah" tab - visible from any camera angle. */
@@ -182,11 +184,19 @@ function AgentActor({ plan, selected }: { plan: AgentPlan; selected?: boolean })
   const bubbleTimer = useRef(0);
 
   const { status } = plan.agent;
+  const called = !!plan.directorSeat;
   let target = plan.homeSeat;
   let pose: Pose = "sit";
   let active = false;
 
-  if (status === "IDLE") {
+  if (called && plan.directorSeat) {
+    // Summoned to Ruang Direktur - this wins over whatever the agent's own
+    // task status would otherwise have them doing, same as a real meeting
+    // interrupts desk work.
+    target = plan.directorSeat;
+    pose = "sit";
+    active = true;
+  } else if (status === "IDLE") {
     target = plan.idleTarget;
     pose = plan.idleTarget.kind;
     active = plan.idleTarget.kind === "stand";
@@ -252,7 +262,9 @@ function AgentActor({ plan, selected }: { plan: AgentPlan; selected?: boolean })
             <span style={{ width: 6, height: 6, borderRadius: "50%", background: STATUS_COLOR[status] ?? "#6b7a89" }} />
             {plan.agent.displayName}
           </span>
-          <span style={{ fontSize: 10, color: "rgba(238,243,247,0.68)" }}>{statusLabel(status, plan.agent.id)}</span>
+          <span style={{ fontSize: 10, color: "rgba(238,243,247,0.68)" }}>
+            {called ? "🏛 dipanggil ke Ruang Direktur" : statusLabel(status, plan.agent.id)}
+          </span>
         </div>
       </Html>
       {showBubble && (
@@ -357,7 +369,7 @@ function DivisionZone({
   );
 }
 
-function MeetingRoom({ layout }: { layout: OfficeLayout }) {
+function DirectorRoom({ layout }: { layout: OfficeLayout }) {
   const { minX, maxX, minZ, maxZ, table, whiteboard } = layout.meetingRoom;
   const rug = useMemo(() => carpet("#8a4b3c", [2, 2]), []);
   const doorX = (minX + maxX) / 2;
@@ -388,7 +400,7 @@ function MeetingRoom({ layout }: { layout: OfficeLayout }) {
             borderRadius: 8,
           }}
         >
-          Meeting Room
+          🏛 Ruang Direktur
         </div>
       </Html>
     </group>
@@ -519,7 +531,7 @@ function Building({ layout }: { layout: OfficeLayout }) {
         <RBox key={x} position={[x, 1.55, minZ + 0.1]} size={[1.9, 1.22, 0.1]} radius={0.02} color="#9fd3ea" opacity={0.3} roughness={0.05} shadow={false} />
       ))}
       <DivisionPartitions layout={layout} />
-      <MeetingRoom layout={layout} />
+      <DirectorRoom layout={layout} />
       <Lounge layout={layout} />
       <Pantry layout={layout} />
       <GameRoom layout={layout} />
@@ -534,11 +546,14 @@ export default function OfficeScene3D({
   divisions,
   onSelectDivision,
   selectedAgentIds,
+  calledAgentIds,
 }: {
   divisions: Division[];
   onSelectDivision?: (slug: string) => void;
   /** Agents picked in the "Perintah" tab - rendered with a pulsing ring so a command's targets read at a glance. */
   selectedAgentIds?: Set<string>;
+  /** Agents the director has summoned into Ruang Direktur, from any division - see AgentPlan.directorSeat. */
+  calledAgentIds?: Set<string>;
 }) {
   const handleSelect = (slug: string) => onSelectDivision?.(slug);
 
@@ -575,6 +590,19 @@ export default function OfficeScene3D({
     [divisions, pmByDivision, layout]
   );
 
+  // Any agent the director has summoned gets a seat at the same table,
+  // regardless of division - assigned in call order so repeat visitors keep
+  // roughly the same spot while the set is unchanged.
+  const directorSeatByAgentId = useMemo(() => {
+    const map = new Map<string, Seat>();
+    if (!calledAgentIds || calledAgentIds.size === 0) return map;
+    Array.from(calledAgentIds).forEach((agentId, index) => {
+      const slot = layout.meetingRoom.seats[index % layout.meetingRoom.seats.length];
+      map.set(agentId, { pos: new THREE.Vector3(...slot.position), facing: slot.facing });
+    });
+    return map;
+  }, [calledAgentIds, layout]);
+
   const plans: AgentPlan[] = useMemo(() => {
     const result: AgentPlan[] = [];
     for (const d of divisions) {
@@ -597,6 +625,7 @@ export default function OfficeScene3D({
           homeSeat,
           idleTarget: buildIdleTarget(a.id, homeSeat, anchors),
           pmSeat,
+          directorSeat: directorSeatByAgentId.get(a.id) ?? null,
         });
       });
 
@@ -616,11 +645,12 @@ export default function OfficeScene3D({
           homeSeat,
           idleTarget: buildIdleTarget(pm.agent.id, homeSeat, anchors),
           pmSeat: null,
+          directorSeat: directorSeatByAgentId.get(pm.agent.id) ?? null,
         });
       }
     }
     return result;
-  }, [divisions, layout, anchors, pmByDivision, pmsWithSeat]);
+  }, [divisions, layout, anchors, pmByDivision, pmsWithSeat, directorSeatByAgentId]);
 
   return (
     <Canvas shadows camera={{ position: [0, 15, 23], fov: 45 }} dpr={[1, 1.5]}>

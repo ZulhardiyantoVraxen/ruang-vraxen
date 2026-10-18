@@ -4,7 +4,7 @@ import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
 const plexSans = IBM_Plex_Sans({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-sans" });
 const plexMono = IBM_Plex_Mono({ subsets: ["latin"], weight: ["400", "500"], variable: "--font-mono" });
 
-export const metadata = { title: "Kantor Virtual · Agentic AI Platform" };
+export const metadata = { title: "Vraxen Virtual Office · Agentic AI Platform" };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
@@ -28,8 +28,21 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             background: "#0d1826",
           }}
         >
-          <a href="/" style={{ color: "#e8edf2", fontWeight: 600, textDecoration: "none", letterSpacing: "0.01em" }}>
-            Kantor Virtual
+          <a
+            href="/"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              color: "#e8edf2",
+              fontWeight: 600,
+              textDecoration: "none",
+              letterSpacing: "0.01em",
+            }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/vraxen-logo.png" alt="Vraxen" style={{ height: 22, width: "auto", display: "block" }} />
+            <span>Vraxen Virtual Office</span>
           </a>
           <a href="/chief-of-staff" style={{ color: "#8696a8", textDecoration: "none", fontSize: 14 }}>
             PIC Chief of Staff

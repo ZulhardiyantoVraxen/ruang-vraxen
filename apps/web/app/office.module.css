@@ -713,6 +713,24 @@
   margin: 2px 0 14px;
 }
 
+.callToDirectorRoomButton {
+  margin-top: 14px;
+  width: 100%;
+  padding: 9px 0;
+  border-radius: 8px;
+  border: 1px solid #8a6c22;
+  background: linear-gradient(135deg, #c9a13d, #8a6c22);
+  color: #241b05;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.callToDirectorRoomButton:hover {
+  filter: brightness(1.08);
+}
+
 .modalClose {
   margin-top: 16px;
   width: 100%;
