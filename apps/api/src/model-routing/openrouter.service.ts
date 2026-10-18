@@ -2,7 +2,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import OpenAI from "openai";
 import { PrismaService } from "../prisma/prisma.service";
 import { ModelTier, ModelVariant } from "@prisma/client";
-import { OpenRouterClient, resolveModel, RouteDecision } from "@platform/shared";
+import { OpenRouterClient, resolveModel, RouteDecision, RoleHint } from "@platform/shared";
 
 export type { RouteDecision };
 
@@ -24,10 +24,10 @@ export class OpenRouterService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Resolve which exact model id to call for a tier + requested variant. */
-  async resolveModel(tier: ModelTier, variant: ModelVariant): Promise<RouteDecision> {
+  /** Resolve which exact model id to call for a tier + requested variant. `roleHint` narrows a FREE pick to models suited to that specific role (see @platform/shared's model-capability.ts). */
+  async resolveModel(tier: ModelTier, variant: ModelVariant, roleHint?: RoleHint): Promise<RouteDecision> {
     const modelClass = await this.prisma.modelClass.findUniqueOrThrow({ where: { tier } });
-    const decision = resolveModel(modelClass, variant);
+    const decision = resolveModel(modelClass, variant, roleHint);
     if (decision.requiresZeroRetention && variant === "FREE") {
       this.logger.warn(`Tier ${tier} requires zero-retention; ignoring FREE request and using paid model.`);
     }

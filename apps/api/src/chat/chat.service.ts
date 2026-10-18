@@ -63,7 +63,10 @@ ATURAN PALING PENTING: lihat pesan TERAKHIR dari Direktur saja untuk memutuskan 
 
 Jangan pernah mencampur teks biasa dengan JSON dalam satu balasan.`;
 
-    const route = await this.modelRouting.resolveModel(agent.agentRole.tier, agent.modelVariant);
+    const route = await this.modelRouting.resolveModel(agent.agentRole.tier, agent.modelVariant, {
+      roleName: agent.agentRole.name,
+      responsibilities: agent.agentRole.responsibilities,
+    });
 
     let content: string, tokensIn: number, tokensOut: number;
     try {

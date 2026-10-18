@@ -57,7 +57,10 @@ async function runStandardExecutor(
   },
   task: Awaited<ReturnType<typeof prisma.task.findUniqueOrThrow>> & { division: { name: string; slug: string } },
 ) {
-  const route = resolveModel(agent.agentRole.modelClass, agent.modelVariant);
+  const route = resolveModel(agent.agentRole.modelClass, agent.modelVariant, {
+    roleName: agent.agentRole.name,
+    responsibilities: agent.agentRole.responsibilities,
+  });
   const prompt = executorPrompt({
     divisionName: task.division.name,
     roleName: agent.agentRole.name,
@@ -107,7 +110,10 @@ async function runPmExecutor(
   },
   task: Awaited<ReturnType<typeof prisma.task.findUniqueOrThrow>> & { division: { name: string; slug: string } },
 ) {
-  const route = resolveModel(agent.agentRole.modelClass, agent.modelVariant);
+  const route = resolveModel(agent.agentRole.modelClass, agent.modelVariant, {
+    roleName: agent.agentRole.name,
+    responsibilities: agent.agentRole.responsibilities,
+  });
   const projectContext = await getProjectContext(task.projectId);
   const prompt = pmExecutorPrompt({
     divisionName: task.division.name,
@@ -345,7 +351,10 @@ async function relayQuestionThroughChiefOfStaff(
     return { resolved: false };
   }
 
-  const route = resolveModel(chiefRole.modelClass, chief.modelVariant);
+  const route = resolveModel(chiefRole.modelClass, chief.modelVariant, {
+    roleName: chiefRole.name,
+    responsibilities: chiefRole.responsibilities,
+  });
   const prompt = chiefOfStaffRelayPrompt({
     askingRoleName: agent.agentRole.name,
     askingDivisionName: task.division.name,
@@ -414,7 +423,10 @@ async function runQaIfReviewerAssigned(taskId: string, executorOutput: string) {
   const reviewer = reviewerAssignment.agent;
   await apiClient.setAgentStatus(reviewer.id, "REVIEWING");
 
-  const route = resolveModel(reviewer.agentRole.modelClass, reviewer.modelVariant);
+  const route = resolveModel(reviewer.agentRole.modelClass, reviewer.modelVariant, {
+    roleName: reviewer.agentRole.name,
+    responsibilities: reviewer.agentRole.responsibilities,
+  });
   const prompt = reviewerPrompt({
     divisionName: task.division.name,
     reviewerRoleName: reviewer.agentRole.name,

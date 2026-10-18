@@ -71,7 +71,10 @@ export async function handleTaskCreated(taskId: string, payload: TaskCreatedPayl
   // which division it belongs to.
   let forceFinal = false;
   try {
-    const route = resolveModel(chiefRole.modelClass, chief.modelVariant);
+    const route = resolveModel(chiefRole.modelClass, chief.modelVariant, {
+      roleName: chiefRole.name,
+      responsibilities: chiefRole.responsibilities,
+    });
     const prompt = chiefOfStaffTriagePrompt({
       taskTitle: task.title,
       taskDescription: task.description,
