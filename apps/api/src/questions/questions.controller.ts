@@ -27,6 +27,6 @@ export class QuestionsController {
 
   @Patch(":id/answer")
   answer(@Param("id") id: string, @Body() dto: AnswerDirectorQuestionDto) {
-    return this.service.answer(id, dto.answer, dto.approverRef);
+    return this.service.answer(id, dto.answer, dto.approverRef, dto.attachmentId);
   }
 }

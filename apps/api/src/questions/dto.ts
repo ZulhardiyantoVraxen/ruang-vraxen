@@ -11,6 +11,8 @@ export class AskDirectorDto {
 export class AnswerDirectorQuestionDto {
   @IsString() answer!: string;
   @IsOptional() @IsString() approverRef?: string;
+  /** Id returned by POST /uploads - "setiap pertanyaan juga ada attachment filenya". */
+  @IsOptional() @IsString() attachmentId?: string;
 }
 
 /**

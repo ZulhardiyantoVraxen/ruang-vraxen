@@ -125,8 +125,9 @@ export const api = {
     >("/tasks/archive"),
   /** The director's queue of questions raised by PM/decision-point agents mid-task. */
   openQuestions: () => request<any[]>("/questions/open"),
-  answerQuestion: (id: string, answer: string) =>
-    request<any>(`/questions/${id}/answer`, { method: "PATCH", body: JSON.stringify({ answer }) }),
+  /** `attachmentId` from `uploadFile` - "setiap pertanyaan juga ada attachment filenya". */
+  answerQuestion: (id: string, answer: string, attachmentId?: string) =>
+    request<any>(`/questions/${id}/answer`, { method: "PATCH", body: JSON.stringify({ answer, attachmentId }) }),
   /** Director confirms a repo-request question - records which GitHub repo the project now commits to, and resumes the paused task. */
   confirmRepo: (id: string, repoName: string) =>
     request<any>(`/questions/${id}/confirm-repo`, { method: "PATCH", body: JSON.stringify({ repoName }) }),

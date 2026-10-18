@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
+import NavQuestionBadge from "./components/NavQuestionBadge";
 
 const plexSans = IBM_Plex_Sans({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-sans" });
 const plexMono = IBM_Plex_Mono({ subsets: ["latin"], weight: ["400", "500"], variable: "--font-mono" });
@@ -66,8 +67,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <a href="/approvals" style={{ color: "#8696a8", textDecoration: "none", fontSize: 14 }}>
             Approval
           </a>
-          <a href="/questions" style={{ color: "#8696a8", textDecoration: "none", fontSize: 14 }}>
+          <a href="/questions" style={{ color: "#8696a8", textDecoration: "none", fontSize: 14, display: "inline-flex", alignItems: "center" }}>
             Pertanyaan
+            <NavQuestionBadge />
           </a>
           <a href="/archive" style={{ color: "#8696a8", textDecoration: "none", fontSize: 14 }}>
             Arsip

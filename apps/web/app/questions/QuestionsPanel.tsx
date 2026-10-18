@@ -58,13 +58,36 @@ export default function QuestionsPanel({ initial }: { initial: Question[] }) {
   const [repoNameDrafts, setRepoNameDrafts] = useState<Record<string, string>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
 
+  // "Setiap pertanyaan juga ada attachment filenya" - same attach-then-send
+  // pattern as the chat/perintah surfaces: picking a file uploads it right
+  // away, and the id sits here until the answer is actually sent.
+  const [attachments, setAttachments] = useState<Record<string, { id: string; filename: string }>>({});
+  const [uploadingId, setUploadingId] = useState<string | null>(null);
+
+  async function attach(id: string, file: File) {
+    setUploadingId(id);
+    try {
+      const res = await api.uploadFile(file);
+      setAttachments((prev) => ({ ...prev, [id]: { id: res.id, filename: res.filename } }));
+    } catch {
+      // leave no attachment rather than blocking the answer box
+    } finally {
+      setUploadingId(null);
+    }
+  }
+
   async function answer(id: string) {
     const text = (drafts[id] ?? "").trim();
     if (!text) return;
     setBusyId(id);
     try {
-      await api.answerQuestion(id, text);
+      await api.answerQuestion(id, text, attachments[id]?.id);
       setQuestions((prev) => prev.filter((q) => q.id !== id));
+      setAttachments((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
     } catch {
       // leave the card + draft in place so the director can just retry
     } finally {
@@ -150,11 +173,36 @@ export default function QuestionsPanel({ initial }: { initial: Question[] }) {
                 <ExpandableText text={q.question} className={styles.question} />
                 <textarea
                   className={styles.answerBox}
-                  placeholder="Ketik jawaban Anda..."
+                  placeholder="Ketik jawaban Anda... (tempel link juga bisa, akan dibaca otomatis oleh agent)"
                   value={drafts[q.id] ?? ""}
                   onChange={(e) => setDrafts((prev) => ({ ...prev, [q.id]: e.target.value }))}
                 />
                 <div className={styles.answerRow}>
+                  <label className={styles.answerButton} style={{ cursor: "pointer", background: "transparent" }}>
+                    {uploadingId === q.id ? "Mengunggah…" : "📎 Lampirkan file"}
+                    <input
+                      type="file"
+                      style={{ display: "none" }}
+                      disabled={uploadingId === q.id}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) attach(q.id, file);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                  {attachments[q.id] && (
+                    <span className={styles.metaText}>
+                      {attachments[q.id].filename}{" "}
+                      <button
+                        type="button"
+                        onClick={() => setAttachments((prev) => { const next = { ...prev }; delete next[q.id]; return next; })}
+                        style={{ background: "none", border: "none", color: "inherit", cursor: "pointer" }}
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  )}
                   <button
                     className={styles.answerButton}
                     disabled={busyId === q.id || !(drafts[q.id] ?? "").trim()}

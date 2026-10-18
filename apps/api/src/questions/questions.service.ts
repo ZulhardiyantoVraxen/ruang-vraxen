@@ -5,6 +5,8 @@ import { TasksService } from "../tasks/tasks.service";
 import { TOPICS } from "@platform/shared";
 import { AskDirectorDto, RequestGithubRepoDto } from "./dto";
 import { ObjectStorageService } from "../storage/object-storage.service";
+import { UploadsService } from "../uploads/uploads.service";
+import { LinkReaderService } from "../common/link-reader.service";
 
 /** Machine-parseable prefix the Questions UI uses to show a dedicated "create this repo" card instead of a free-text answer box. */
 const REPO_REQUEST_PREFIX = "[REPO_REQUEST:";
@@ -22,6 +24,8 @@ export class QuestionsService {
     private readonly kafka: KafkaService,
     private readonly tasks: TasksService,
     private readonly storage: ObjectStorageService,
+    private readonly uploads: UploadsService,
+    private readonly linkReader: LinkReaderService,
   ) {}
 
   /** The director's inbox - every question still waiting on an answer. */
@@ -98,11 +102,20 @@ export class QuestionsService {
     return this.answer(id, `Repo sudah dibuat: https://github.com/${owner}/${repoName}`);
   }
 
-  /** Director answers - a question tied to a task hands that task straight back to the same agent to resume. */
-  async answer(id: string, answer: string, approverRef?: string) {
+  /**
+   * Director answers - a question tied to a task hands that task straight
+   * back to the same agent to resume. `attachmentId` ("setiap pertanyaan
+   * juga ada attachment filenya") and any URL typed into the answer text
+   * ("agent juga bisa membaca dari link yang saya berikan") are both folded
+   * into what the resumed agent actually sees, the same way chat does it -
+   * the question record itself just keeps the short answer text.
+   */
+  async answer(id: string, answer: string, approverRef?: string, attachmentId?: string) {
+    const attachmentNote = attachmentId ? `\n\n📎 Lampiran: ${this.uploads.filenameFromId(attachmentId)} (/uploads/${attachmentId})` : "";
+    const storedAnswer = `${answer}${attachmentNote}`;
     const question = await this.prisma.directorQuestion.update({
       where: { id },
-      data: { answer, status: "ANSWERED", answeredAt: new Date() },
+      data: { answer: storedAnswer, status: "ANSWERED", answeredAt: new Date() },
     });
     await this.kafka.publish(TOPICS.TASK_EVENTS, {
       eventType: "director.question.answered",
@@ -112,10 +125,20 @@ export class QuestionsService {
 
     if (question.taskId) {
       const task = await this.prisma.task.findUniqueOrThrow({ where: { id: question.taskId } });
+      // The resumed agent gets the FULL picture - attachment content read
+      // verbatim and any linked page fetched - not just the short reference
+      // line kept on the question record itself.
+      const extras = (
+        await Promise.all([
+          attachmentId ? this.uploads.describeForPrompt(attachmentId) : Promise.resolve(null),
+          this.linkReader.describeLinksInText(answer),
+        ])
+      ).filter((x): x is string => Boolean(x));
+      const answerForAgent = [answer, ...extras].join("\n\n");
       await this.prisma.task.update({
         where: { id: task.id },
         data: {
-          description: [task.description, `[Pertanyaan ke Direktur] ${question.question}`, `[Jawaban Direktur] ${answer}`]
+          description: [task.description, `[Pertanyaan ke Direktur] ${question.question}`, `[Jawaban Direktur] ${answerForAgent}`]
             .filter(Boolean)
             .join("\n\n"),
         },

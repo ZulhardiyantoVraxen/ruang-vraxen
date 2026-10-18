@@ -4,6 +4,7 @@ import { OpenRouterService } from "../model-routing/openrouter.service";
 import { TasksService } from "../tasks/tasks.service";
 import { UsageService } from "../usage/usage.service";
 import { UploadsService } from "../uploads/uploads.service";
+import { LinkReaderService } from "../common/link-reader.service";
 
 type ChatResult =
   | { type: "chat"; reply: string }
@@ -33,6 +34,7 @@ export class ChatService {
     private readonly tasks: TasksService,
     private readonly usage: UsageService,
     private readonly uploads: UploadsService,
+    private readonly linkReader: LinkReaderService,
   ) {}
 
   history(agentId: string) {
@@ -65,6 +67,10 @@ export class ChatService {
     const history = recent.reverse(); // oldest first, includes the message we just stored
 
     const attachmentForModel = attachmentId ? await this.uploads.describeForPrompt(attachmentId) : null;
+    // "Agent juga bisa membaca dari link yang saya berikan" - any URL typed
+    // straight into the message gets fetched too, same as an attachment.
+    const linksForModel = await this.linkReader.describeLinksInText(message);
+    const extrasForModel = [attachmentForModel, linksForModel].filter(Boolean).join("\n\n") || null;
 
     const systemPrompt = `Kamu adalah ${agent.displayName}, ${agent.agentRole.name} di divisi ${agent.agentRole.division.name}.${
       agent.agentRole.responsibilities ? ` Tanggung jawabmu: ${agent.agentRole.responsibilities}.` : ""
@@ -89,7 +95,7 @@ Jangan pernah mencampur teks biasa dengan JSON dalam satu balasan.`;
         // The last entry is the message we just stored above - swap in the
         // attachment's full content for the model call only (the thread
         // itself keeps the short reference line, see storedMessage above).
-        content: attachmentForModel && i === history.length - 1 ? `${message}\n\n${attachmentForModel}` : m.content,
+        content: extrasForModel && i === history.length - 1 ? `${message}\n\n${extrasForModel}` : m.content,
       }));
       const result = await this.modelRouting.chat(route.modelId, [
         { role: "system", content: systemPrompt },
