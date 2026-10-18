@@ -89,8 +89,18 @@ export class GoogleSheetsClient {
   }
 
   /**
-   * Creates a new spreadsheet with one sheet of `rows`, moves it into
+   * Creates a new spreadsheet with one sheet of `rows`, directly inside
    * `parentFolderId`, and returns its id + editable Drive URL.
+   *
+   * Deliberately created via the DRIVE API (files.create with `parents` set
+   * up front) rather than Sheets API's own `spreadsheets.create` - a plain
+   * service account has zero Drive storage quota of its own
+   * (`about.storageQuota.limit === "0"`), so a file that materializes in its
+   * own My Drive first (as spreadsheets.create always does, with no way to
+   * set a parent at creation) is rejected outright with a bare 403
+   * "The caller does not have permission" before it can even be moved.
+   * Creating straight into a folder a real Workspace user owns spends THAT
+   * folder's quota instead, which the service account has Editor access to.
    */
   async createSpreadsheet(
     title: string,
@@ -100,29 +110,26 @@ export class GoogleSheetsClient {
     const token = await this.getAccessToken();
     const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 
-    const createRes = await fetch("https://sheets.googleapis.com/v4/spreadsheets", {
+    const createRes = await fetch("https://www.googleapis.com/drive/v3/files?fields=id", {
       method: "POST",
       headers,
-      body: JSON.stringify({ properties: { title }, sheets: [{ properties: { title: "Budget" } }] }),
+      body: JSON.stringify({
+        name: title,
+        mimeType: "application/vnd.google-apps.spreadsheet",
+        parents: [parentFolderId],
+      }),
     });
-    if (!createRes.ok) throw new Error(`Google Sheets create gagal (${createRes.status}): ${await createRes.text()}`);
-    const created = (await createRes.json()) as { spreadsheetId: string };
-    const spreadsheetId = created.spreadsheetId;
+    if (!createRes.ok) throw new Error(`Google Drive buat spreadsheet gagal (${createRes.status}): ${await createRes.text()}`);
+    const created = (await createRes.json()) as { id: string };
+    const spreadsheetId = created.id;
 
+    // A spreadsheet created via the Drive API (rather than Sheets API) gets
+    // Google's default first-tab name, "Sheet1".
     const valuesRes = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Budget!A1?valueInputOption=USER_ENTERED`,
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Sheet1!A1?valueInputOption=USER_ENTERED`,
       { method: "PUT", headers, body: JSON.stringify({ values: rows }) },
     );
     if (!valuesRes.ok) throw new Error(`Google Sheets isi nilai gagal (${valuesRes.status}): ${await valuesRes.text()}`);
-
-    // A freshly-created spreadsheet lives in the service account's own
-    // (invisible-to-humans) My Drive - move it into the folder the director
-    // already shared with the service account so it shows up for them too.
-    const moveRes = await fetch(
-      `https://www.googleapis.com/drive/v3/files/${spreadsheetId}?addParents=${parentFolderId}&removeParents=root&fields=id,parents`,
-      { method: "PATCH", headers: { Authorization: `Bearer ${token}` } },
-    );
-    if (!moveRes.ok) throw new Error(`Google Drive pindah folder gagal (${moveRes.status}): ${await moveRes.text()}`);
 
     return { spreadsheetId, url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit` };
   }
