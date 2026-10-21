@@ -146,4 +146,20 @@ export const api = {
     request<any>(`/onboarding/${sessionId}/answer`, { method: "POST", body: JSON.stringify({ answer }) }),
   confirmOnboarding: (sessionId: string, slug: string, name: string, description?: string) =>
     request<any>(`/onboarding/${sessionId}/confirm`, { method: "POST", body: JSON.stringify({ slug, name, description }) }),
+
+  // --- Meeting rooms (Point 4: satu privat Direktur+CEO, satu terbuka untuk semua tim yang diundang) ---
+  listMeetings: (status?: string) => request<any[]>(`/meetings${status ? `?status=${status}` : ""}`),
+  getMeeting: (id: string) => request<any>(`/meetings/${id}`),
+  /** Idempotent - always resolves to the same standing Direktur-CEO room. */
+  openDirectorCeoRoom: () => request<any>("/meetings/director-ceo", { method: "POST" }),
+  createMeeting: (title: string, inviteAgentIds: string[]) =>
+    request<any>("/meetings", { method: "POST", body: JSON.stringify({ title, inviteAgentIds }) }),
+  sendMeetingMessage: (id: string, content: string) =>
+    request<{ messages: any[]; failures: { agentId: string; agentName: string; reason: string }[] }>(
+      `/meetings/${id}/messages`,
+      { method: "POST", body: JSON.stringify({ content }) },
+    ),
+  inviteToMeeting: (id: string, agentId: string) =>
+    request<any>(`/meetings/${id}/invite`, { method: "POST", body: JSON.stringify({ agentId }) }),
+  closeMeeting: (id: string) => request<any>(`/meetings/${id}/close`, { method: "POST" }),
 };

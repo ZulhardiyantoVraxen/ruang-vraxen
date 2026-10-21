@@ -132,11 +132,13 @@ model Agent {
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
-  assignments       TaskAssignment[]
-  usageLogs         UsageLog[]
-  costCaps          CostCap[]
-  directorQuestions DirectorQuestion[]
-  chatMessages      ChatMessage[]
+  assignments           TaskAssignment[]
+  usageLogs             UsageLog[]
+  costCaps              CostCap[]
+  directorQuestions     DirectorQuestion[]
+  chatMessages          ChatMessage[]
+  meetingParticipations MeetingParticipant[]
+  meetingMessages       MeetingMessage[]
 
   @@index([status])
 }
@@ -162,6 +164,68 @@ model ChatMessage {
   createdAt DateTime @default(now())
 
   @@index([agentId, createdAt])
+}
+
+// --- Meeting rooms (Point 4: "satu privat Direktur+CEO, satu terbuka untuk
+// semua tim yang diundang") --------------------------------------------------
+
+enum MeetingRoomType {
+  DIRECTOR_CEO // singleton - always resolved via ensureDirectorCeoRoom(), never created by hand
+  OPEN         // ad hoc per topic - created with a title + whichever agents the Director invites
+}
+
+enum MeetingRoomStatus {
+  ACTIVE
+  CLOSED
+}
+
+// A multi-party thread, distinct from ChatMessage's one-agent-at-a-time
+// design: every message the Director posts here triggers EVERY participant
+// agent to generate its own reply (same self-healing OpenRouter chain
+// ChatService uses), so a room behaves like a real roundtable rather than a
+// shared log. DIRECTOR_CEO is fixed to one standing room with Edward (CEO)
+// as its only participant; OPEN rooms are freely created/closed per topic.
+model MeetingRoom {
+  id           String             @id @default(cuid())
+  type         MeetingRoomType
+  title        String
+  status       MeetingRoomStatus  @default(ACTIVE)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  participants MeetingParticipant[]
+  messages     MeetingMessage[]
+
+  @@index([type, status])
+}
+
+model MeetingParticipant {
+  id            String      @id @default(cuid())
+  meetingRoomId String
+  meetingRoom   MeetingRoom @relation(fields: [meetingRoomId], references: [id], onDelete: Cascade)
+  agentId       String
+  agent         Agent       @relation(fields: [agentId], references: [id])
+  joinedAt      DateTime    @default(now())
+
+  @@unique([meetingRoomId, agentId])
+}
+
+enum MeetingSenderType {
+  DIRECTOR
+  AGENT
+}
+
+model MeetingMessage {
+  id            String            @id @default(cuid())
+  meetingRoomId String
+  meetingRoom   MeetingRoom       @relation(fields: [meetingRoomId], references: [id], onDelete: Cascade)
+  senderType    MeetingSenderType
+  senderAgentId String?
+  senderAgent   Agent?            @relation(fields: [senderAgentId], references: [id])
+  content       String            @db.Text
+  createdAt     DateTime          @default(now())
+
+  @@index([meetingRoomId, createdAt])
 }
 
 // --- Work: tasks, parallel subtasks, QA, approvals --------------------------

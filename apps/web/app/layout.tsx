@@ -67,6 +67,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <a href="/approvals" style={{ color: "#8696a8", textDecoration: "none", fontSize: 14 }}>
             Approval
           </a>
+          <a href="/meetings" style={{ color: "#8696a8", textDecoration: "none", fontSize: 14 }}>
+            Rapat
+          </a>
           <a href="/questions" style={{ color: "#8696a8", textDecoration: "none", fontSize: 14, display: "inline-flex", alignItems: "center" }}>
             Pertanyaan
             <NavQuestionBadge />
