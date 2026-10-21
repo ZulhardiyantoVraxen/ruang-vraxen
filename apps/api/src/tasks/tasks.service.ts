@@ -489,6 +489,17 @@ export class TasksService {
    *   - no PM in that division, or the idle agent IS the PM -> Chief of Staff
    *   - Chief of Staff themself idle -> straight to the director, as a
    *     DirectorQuestion (same inbox as "Pertanyaan")
+   *
+   * Staff Direksi (the C-suite division added after this chain was
+   * designed) is one more rung above the Chief of Staff, not below it, so
+   * it gets its own top-of-chain case rather than falling into the generic
+   * "PM idle -> Chief of Staff" branch: idle CFO/COO/CTO escalate to
+   * Edward (CEO, the division's requiresApproval role, same mechanism as
+   * any other PM), but an idle CEO escalates straight to the Director
+   * exactly like an idle Chief of Staff does - having the company's own
+   * secretariat (Hermes/Sekretaris Direksi) hand the CEO work would invert
+   * the real reporting line.
+   *
    * Idempotent per agent per calendar day (same marker-title pattern as
    * auditDailyCheckIn) so a frequent cron tick never spams the same notice.
    */
@@ -516,6 +527,7 @@ export class TasksService {
     const skipped: { agentId: string; reason: string }[] = [];
 
     for (const division of divisions) {
+      const isStaffDireksi = division.slug === "staff-direksi";
       const pmRole = division.agentRoles.find((r) => r.requiresApproval && division.slug !== "pusat");
       const pm = pmRole?.agents[0] ?? null;
 
@@ -531,14 +543,15 @@ export class TasksService {
           }
 
           const isChiefOfStaff = division.slug === "pusat" && chief?.id === agent.id;
+          const isDireksiTop = isStaffDireksi && pm?.id === agent.id;
           try {
-            if (isChiefOfStaff) {
-              if (!chief) throw new Error("Chief of Staff tidak ditemukan");
+            if (isChiefOfStaff || isDireksiTop) {
+              const label = isChiefOfStaff ? "Chief of Staff" : role.name; // "CEO"
               await this.prisma.directorQuestion.create({
                 data: {
-                  agentId: chief.id,
+                  agentId: agent.id,
                   divisionId: division.id,
-                  question: `${chief.displayName} (Chief of Staff) sedang tidak ada pekerjaan. Ada arahan untuk hari ini?`,
+                  question: `${agent.displayName} (${label}) sedang tidak ada pekerjaan. Ada arahan untuk hari ini?`,
                 },
               });
               notified.push({ agentId: agent.id, agentName: agent.displayName, routedTo: "Direktur" });
