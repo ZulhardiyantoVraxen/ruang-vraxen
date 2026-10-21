@@ -18,12 +18,12 @@ type MeetingRoom = {
 
 function formatBadge(room: MeetingRoom) {
   if (room.status === "CLOSED") return { label: "Ditutup", cls: styles.badgeClosed };
-  if (room.type === "DIRECTOR_CEO") return { label: "Privat · Direktur & CEO", cls: styles.badgeDirectorCeo };
+  if (room.type === "DIRECTOR_CEO") return { label: "Privat · Direktur & Staff Direksi", cls: styles.badgeDirectorCeo };
   return { label: "Terbuka", cls: styles.badgeOpen };
 }
 
 /**
- * Point 4: "satu privat Direktur+CEO, satu terbuka untuk semua tim yang
+ * Point 4: "satu privat Direktur+Staff Direksi, satu terbuka untuk semua tim yang
  * diundang." The private room is a one-click standing fixture (idempotent -
  * opening it twice never creates a duplicate); open rooms are created ad hoc
  * per topic with whichever agents the Director picks from the full roster.
@@ -82,7 +82,7 @@ export default function MeetingsPanel({ initialRooms, divisions }: { initialRoom
         <h1>Ruang Rapat</h1>
       </div>
       <p className={styles.lead}>
-        Rapat privat selalu antara Anda dan CEO. Rapat terbuka dibuat per topik - undang tim mana saja yang perlu hadir;
+        Rapat privat selalu antara Anda dan seluruh Staff Direksi (CEO, CFO, CTO, COO). Rapat terbuka dibuat per topik - undang tim mana saja yang perlu hadir;
         setiap kali Anda mengirim pesan, semua peserta yang diundang ikut menanggapi secara bergiliran.
       </p>
 
@@ -90,12 +90,12 @@ export default function MeetingsPanel({ initialRooms, divisions }: { initialRoom
         <a href={`/meetings/${directorCeoRoom.id}`} className={styles.card}>
           <p className={styles.cardTitle}>{directorCeoRoom.title}</p>
           <div className={styles.cardMeta}>
-            <span className={`${styles.badge} ${styles.badgeDirectorCeo}`}>Privat · Direktur &amp; CEO</span>
+            <span className={`${styles.badge} ${styles.badgeDirectorCeo}`}>Privat · Direktur &amp; Staff Direksi</span>
           </div>
         </a>
       ) : (
         <button className={styles.primaryButton} disabled={busy} onClick={openPrivateRoom} style={{ alignSelf: "flex-start" }}>
-          {busy ? "Membuka…" : "🏛 Buka rapat privat dengan CEO"}
+          {busy ? "Membuka…" : "🏛 Buka rapat privat dengan Staff Direksi"}
         </button>
       )}
 

@@ -17,8 +17,8 @@ const ROOM_WITH_DETAIL = {
 const TRANSCRIPT_WINDOW = 40; // enough roundtable turns for context without ballooning every model call
 
 /**
- * Point 4: "dua meeting-room construct - satu privat Direktur+CEO, satu
- * terbuka untuk semua tim yang diundang."
+ * Point 4: "dua meeting-room construct - satu privat Direktur+Staff
+ * Direksi, satu terbuka untuk semua tim yang diundang."
  *
  * Unlike ChatService (one agent, one thread, synchronous classify-or-reply),
  * a meeting room has several agents sharing one transcript. Every message
@@ -73,34 +73,47 @@ export class MeetingsService {
   }
 
   /**
-   * Resolves (and lazily creates, exactly once) the standing private room
-   * between the Director and Edward (CEO, Staff Direksi) - "satu privat
-   * Direktur+CEO". Idempotent: a second call never creates a duplicate, it
-   * just returns the existing ACTIVE room.
+   * Resolves the standing private room between the Director and the WHOLE
+   * Staff Direksi roster (CEO/CFO/CTO/COO - the division slugged
+   * "staff-direksi"), not just the CEO - "satu privat Direktur+Staff
+   * Direksi". The Prisma enum value is still named DIRECTOR_CEO (that was
+   * this room's first, too-narrow design before this fix; renaming the DB
+   * enum isn't worth a migration for an internal label nobody sees), but
+   * the actual membership is the full division roster.
+   *
+   * Idempotent AND self-healing: a second call never creates a duplicate
+   * room, and every call tops up the existing room with any staff-direksi
+   * agent who isn't a participant yet (covers both this fix's one-time
+   * backfill and, going forward, a newly hired Staff Direksi member
+   * automatically joining the standing room on its next open).
    */
   async ensureDirectorCeoRoom() {
-    const existing = await this.prisma.meetingRoom.findFirst({
-      where: { type: "DIRECTOR_CEO", status: "ACTIVE" },
-      include: ROOM_WITH_DETAIL,
+    const staffDireksiAgents = await this.prisma.agent.findMany({
+      where: { agentRole: { division: { slug: "staff-direksi" } } },
     });
-    if (existing) return existing;
+    if (staffDireksiAgents.length === 0) {
+      throw new BadRequestException("Belum ada agent Staff Direksi - jalankan seed lebih dulu");
+    }
 
-    const ceoRole = await this.prisma.agentRole.findFirst({
-      where: { name: { equals: "CEO", mode: "insensitive" }, division: { slug: "staff-direksi" } },
-      include: { agents: true },
-    });
-    const ceo = ceoRole?.agents[0];
-    if (!ceo) throw new BadRequestException("Agent CEO (Staff Direksi) tidak ditemukan - jalankan seed lebih dulu");
+    const existing = await this.prisma.meetingRoom.findFirst({ where: { type: "DIRECTOR_CEO", status: "ACTIVE" } });
 
-    const created = await this.prisma.meetingRoom.create({
-      data: {
-        type: "DIRECTOR_CEO" as MeetingRoomType,
-        title: "Rapat Direktur & CEO",
-        participants: { create: [{ agentId: ceo.id }] },
-      },
-      include: ROOM_WITH_DETAIL,
-    });
-    return created;
+    const roomId = existing
+      ? existing.id
+      : (
+          await this.prisma.meetingRoom.create({
+            data: { type: "DIRECTOR_CEO" as MeetingRoomType, title: "Rapat Direktur & Staff Direksi" },
+          })
+        ).id;
+
+    for (const agent of staffDireksiAgents) {
+      await this.prisma.meetingParticipant.upsert({
+        where: { meetingRoomId_agentId: { meetingRoomId: roomId, agentId: agent.id } },
+        create: { meetingRoomId: roomId, agentId: agent.id },
+        update: {},
+      });
+    }
+
+    return this.get(roomId);
   }
 
   /** "Terbuka untuk semua tim yang diundang" - ad hoc per topik, roster dipilih Direktur saat dibuat. */
@@ -122,7 +135,7 @@ export class MeetingsService {
 
   async invite(roomId: string, agentId: string) {
     const room = await this.prisma.meetingRoom.findUniqueOrThrow({ where: { id: roomId } });
-    if (room.type !== "OPEN") throw new BadRequestException("Rapat privat Direktur-CEO tidak bisa menerima undangan baru");
+    if (room.type !== "OPEN") throw new BadRequestException("Rapat privat Direktur-Staff Direksi tidak bisa menerima undangan baru");
     if (room.status !== "ACTIVE") throw new BadRequestException("Rapat ini sudah ditutup");
 
     await this.prisma.agent.findUniqueOrThrow({ where: { id: agentId } });
@@ -136,7 +149,7 @@ export class MeetingsService {
 
   async close(roomId: string) {
     const room = await this.prisma.meetingRoom.findUniqueOrThrow({ where: { id: roomId } });
-    if (room.type !== "OPEN") throw new BadRequestException("Rapat privat Direktur-CEO selalu terbuka, tidak bisa ditutup");
+    if (room.type !== "OPEN") throw new BadRequestException("Rapat privat Direktur-Staff Direksi selalu terbuka, tidak bisa ditutup");
     await this.prisma.meetingRoom.update({ where: { id: roomId }, data: { status: "CLOSED" as MeetingRoomStatus } });
     return this.get(roomId);
   }
