@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from "@nes
 import { PrismaService } from "../prisma/prisma.service";
 import { OpenRouterService } from "../model-routing/openrouter.service";
 import { UsageService } from "../usage/usage.service";
+import { TasksService } from "../tasks/tasks.service";
 import { MeetingRoomType, MeetingRoomStatus, Prisma } from "@prisma/client";
 
 const AGENT_WITH_ROLE = {
@@ -28,6 +29,16 @@ const TRANSCRIPT_WINDOW = 40; // enough roundtable turns for context without bal
  * (chatWithFallback) as everything else in the platform; a participant whose
  * entire fallback chain fails is skipped for that round rather than blocking
  * the others or polluting the thread with an error message.
+ *
+ * "Task akan masuk dari hasil meeting dengan Staff Direksi" - the PIC Chief
+ * of Staff page (a standalone "give work directly" form) was retired once
+ * this existed, so a meeting has to be able to actually produce a real Task
+ * on its own, not just a chat transcript. Each participant's reply is
+ * classified the same way ChatService classifies a 1:1 chat reply: a work
+ * order clearly directed at that participant becomes a real Task (via
+ * TasksService.createDirectCommand, landing in THAT agent's own division)
+ * instead of a plain message, with a short system note taking its place in
+ * the transcript so the meeting stays coherent.
  */
 @Injectable()
 export class MeetingsService {
@@ -37,6 +48,7 @@ export class MeetingsService {
     private readonly prisma: PrismaService,
     private readonly modelRouting: OpenRouterService,
     private readonly usage: UsageService,
+    private readonly tasks: TasksService,
   ) {}
 
   list(status?: string) {
@@ -169,7 +181,13 @@ Berikut transkrip rapat sejauh ini (urut dari lama ke baru):
 
 ${transcriptText}
 
-Berikan tanggapanmu sebagai ${agent.displayName} terhadap perkembangan terbaru di atas - singkat, relevan dengan peranmu, dan dalam Bahasa Indonesia. Kalau tidak ada yang perlu kamu tambahkan dari sisi perananmu, cukup bilang itu secara singkat (jangan mengulang pendapat yang sudah disampaikan orang lain).`;
+Berikan tanggapanmu sebagai ${agent.displayName} terhadap perkembangan terbaru di atas - singkat, relevan dengan peranmu, dan dalam Bahasa Indonesia. Kalau tidak ada yang perlu kamu tambahkan dari sisi perananmu, cukup bilang itu secara singkat (jangan mengulang pendapat yang sudah disampaikan orang lain).
+
+ATURAN PALING PENTING: lihat pesan TERAKHIR dari Direktur saja untuk memutuskan ini.
+- Kalau pesan itu OBROLAN/DISKUSI/KOORDINASI BIASA (update status, pertanyaan, pendapat) -> balas sebagai teks natural seperti di atas. JANGAN pernah balas JSON untuk kasus ini.
+- Kalau pesan itu benar-benar PERINTAH KERJA/TUGAS BARU yang jelas ditujukan untukmu secara spesifik (disebut namamu, atau jelas satu-satunya yang relevan dari perananmu) -> balas HANYA dengan JSON murni tanpa markdown fence, persis format ini: {"type":"task","title":"judul singkat tugas","description":"detail lengkap tugasnya"}
+
+Jangan pernah mencampur teks biasa dengan JSON dalam satu balasan.`;
 
       try {
         const route = await this.modelRouting.resolveModel(agent.agentRole.tier, agent.modelVariant, {
@@ -185,8 +203,32 @@ Berikan tanggapanmu sebagai ${agent.displayName} terhadap perkembangan terbaru d
           { aggregateId: roomId, source: "meeting" },
         );
 
+        const unfenced = result.content.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+        let taskDraft: { title: string; description: string } | null = null;
+        try {
+          const parsed = JSON.parse(unfenced);
+          if (parsed?.type === "task" && typeof parsed.title === "string") {
+            taskDraft = { title: parsed.title, description: typeof parsed.description === "string" ? parsed.description : parsed.title };
+          }
+        } catch {
+          // Not JSON - treat as a normal meeting reply below.
+        }
+
+        let replyContent = result.content;
+        if (taskDraft) {
+          try {
+            const taskResult = await this.tasks.createDirectCommand(agent.id, taskDraft.title, taskDraft.description);
+            replyContent = taskResult.queued
+              ? `📋 Dicatat sebagai tugas: "${taskDraft.title}" — saya sedang mengerjakan hal lain, akan saya kerjakan begitu selesai.`
+              : `📋 Dicatat sebagai tugas: "${taskDraft.title}" — langsung saya kerjakan, bisa dipantau di Task Board.`;
+          } catch (taskErr) {
+            this.logger.error(`Meeting ${roomId}: gagal membuat task dari balasan ${agent.displayName}: ${taskErr instanceof Error ? taskErr.message : taskErr}`);
+            replyContent = `Maaf, saya mengerti ini sebagai tugas ("${taskDraft.title}") tapi gagal mencatatnya barusan.`;
+          }
+        }
+
         const reply = await this.prisma.meetingMessage.create({
-          data: { meetingRoomId: roomId, senderType: "AGENT", senderAgentId: agent.id, content: result.content },
+          data: { meetingRoomId: roomId, senderType: "AGENT", senderAgentId: agent.id, content: replyContent },
           include: { senderAgent: true },
         });
         created.push(reply);

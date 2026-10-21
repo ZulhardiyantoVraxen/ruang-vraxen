@@ -55,9 +55,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             </span>
             <span>Vraxen Virtual Office</span>
           </a>
-          <a href="/chief-of-staff" style={{ color: "#8696a8", textDecoration: "none", fontSize: 14 }}>
-            PIC Chief of Staff
-          </a>
+          {/* "PIC Chief of Staff" dicabut dari menu - tugas sekarang masuk lewat
+              hasil Rapat (/meetings) dengan Staff Direksi, bukan form terpisah
+              ini. Halaman & route-nya tetap ada (tidak dihapus) kalau suatu
+              saat dibutuhkan lagi. */}
           <a href="/divisions/new" style={{ color: "#8696a8", textDecoration: "none", fontSize: 14 }}>
             + Divisi baru
           </a>
