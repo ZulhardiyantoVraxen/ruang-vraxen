@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { api } from "@/lib/api";
+import { AttachmentPicker, PendingAttachment } from "../../components/AttachmentPicker";
 import styles from "./newDivision.module.css";
 
 type Reply =
@@ -33,17 +34,38 @@ export default function NewDivisionPage() {
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
 
+  // "Setiap input ada lampiran" - a brief or an answer to Auditor's question can carry a supporting doc/folder too.
+  const [briefAttachments, setBriefAttachments] = useState<PendingAttachment[]>([]);
+  const [briefUploading, setBriefUploading] = useState(false);
+  const [answerAttachments, setAnswerAttachments] = useState<PendingAttachment[]>([]);
+  const [answerUploading, setAnswerUploading] = useState(false);
+
+  async function attach(files: File[], setList: (fn: (prev: PendingAttachment[]) => PendingAttachment[]) => void, setUploading: (v: boolean) => void) {
+    if (files.length === 0) return;
+    setUploading(true);
+    try {
+      const results = await Promise.allSettled(files.map((f) => api.uploadFile(f)));
+      const uploaded = results
+        .filter((r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof api.uploadFile>>> => r.status === "fulfilled")
+        .map((r) => ({ id: r.value.id, filename: r.value.filename }));
+      setList((prev) => [...prev, ...uploaded]);
+    } finally {
+      setUploading(false);
+    }
+  }
+
   async function begin() {
     if (!brief.trim()) return;
     setBusy(true);
     setError(null);
     try {
-      const res = await api.startOnboarding(brief.trim());
+      const res = await api.startOnboarding(brief.trim(), briefAttachments.map((a) => a.id));
       setSessionId(res.session.id);
       setReply(res.reply);
       setName(brief.trim());
       setSlug(slugify(brief.trim()));
       setInput("");
+      setBriefAttachments([]);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Gagal memulai sesi Auditor.");
     } finally {
@@ -56,9 +78,10 @@ export default function NewDivisionPage() {
     setBusy(true);
     setError(null);
     try {
-      const next = await api.answerOnboarding(sessionId, input.trim());
+      const next = await api.answerOnboarding(sessionId, input.trim(), answerAttachments.map((a) => a.id));
       setReply(next);
       setInput("");
+      setAnswerAttachments([]);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Gagal mengirim jawaban.");
     } finally {
@@ -101,6 +124,13 @@ export default function NewDivisionPage() {
             Boleh ditambah sedikit konteks kalau mau (mis. "Divisi Logistik - urus pengiriman & stok gudang"), tapi
             nama saja sudah cukup.
           </p>
+          <AttachmentPicker
+            items={briefAttachments}
+            uploading={briefUploading}
+            onAddFiles={(files) => attach(files, setBriefAttachments, setBriefUploading)}
+            onRemove={(id) => setBriefAttachments((prev) => prev.filter((a) => a.id !== id))}
+            idPrefix="onboarding-brief"
+          />
           {error && <p style={{ color: "#e0806b", fontSize: 12.5, marginTop: 10 }}>{error}</p>}
           <button className={styles.submitButton} disabled={busy || !brief.trim()} onClick={begin}>
             {busy ? "Auditor sedang menyusun..." : "Minta Auditor susun kebutuhannya"}
@@ -118,6 +148,13 @@ export default function NewDivisionPage() {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && sendAnswer()}
             placeholder="Jawaban Anda..."
+          />
+          <AttachmentPicker
+            items={answerAttachments}
+            uploading={answerUploading}
+            onAddFiles={(files) => attach(files, setAnswerAttachments, setAnswerUploading)}
+            onRemove={(id) => setAnswerAttachments((prev) => prev.filter((a) => a.id !== id))}
+            idPrefix="onboarding-answer"
           />
           {error && <p style={{ color: "#e0806b", fontSize: 12.5, marginTop: 10 }}>{error}</p>}
           <button className={styles.submitButton} disabled={busy || !input.trim()} onClick={sendAnswer}>

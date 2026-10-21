@@ -193,6 +193,17 @@ model MeetingRoom {
   createdAt    DateTime           @default(now())
   updatedAt    DateTime           @updatedAt
 
+  // "Setiap card rapat ada ringkasan dan status" + "simpan ringkasan ke
+  // Google Drive, buat folder baru topik dan tanggal rapat" - set together
+  // every time summarize() runs; lastSummaryDriveUrl stays null when the
+  // Google service account isn't configured (fail-open, same as every
+  // other Drive integration in this platform), but the text fields are
+  // always filled so the list card always has something to show.
+  lastSummaryTitle    String?
+  lastSummaryText     String?  @db.Text
+  lastSummaryAt       DateTime?
+  lastSummaryDriveUrl String?
+
   participants MeetingParticipant[]
   messages     MeetingMessage[]
 

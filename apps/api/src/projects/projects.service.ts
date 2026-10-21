@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateProjectDto } from "./dto";
+import { UploadsService } from "../uploads/uploads.service";
 
 /**
  * "Saya ingin ada project yang sedang dikerjakan" - a Project is just a
@@ -11,7 +12,10 @@ import { CreateProjectDto } from "./dto";
  */
 @Injectable()
 export class ProjectsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly uploads: UploadsService,
+  ) {}
 
   list() {
     return this.prisma.project.findMany({
@@ -20,7 +24,17 @@ export class ProjectsService {
     });
   }
 
-  create(dto: CreateProjectDto) {
-    return this.prisma.project.create({ data: dto });
+  /** "Setiap input ada lampiran" - e.g. a brief or budget doc backing the new project. */
+  async create(dto: CreateProjectDto) {
+    const attachmentIds = dto.attachmentIds ?? [];
+    const attached = await this.uploads.describeManyForPrompt(attachmentIds);
+    const note = this.uploads.noteForIds(attachmentIds);
+    const description = dto.description ? `${dto.description}${note}` : note || undefined;
+    return this.prisma.project.create({
+      data: {
+        name: dto.name,
+        description: attached ? `${description ?? ""}\n\n${attached}`.trim() : description,
+      },
+    });
   }
 }

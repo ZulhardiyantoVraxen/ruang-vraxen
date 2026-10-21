@@ -1,4 +1,4 @@
-import { IsBoolean, IsInt, IsOptional, IsString, Min } from "class-validator";
+import { IsArray, IsBoolean, IsInt, IsOptional, IsString, Min } from "class-validator";
 
 export class CreateDivisionDto {
   @IsString() slug!: string;
@@ -24,4 +24,6 @@ export class CreateAgentRoleDto {
 export class QuickAddPersonnelDto {
   @IsString() roleName!: string;
   @IsOptional() @IsString() responsibilities?: string;
+  /** Ids returned by POST /uploads (one per file - a folder upload is just several). */
+  @IsOptional() @IsArray() @IsString({ each: true }) attachmentIds?: string[];
 }

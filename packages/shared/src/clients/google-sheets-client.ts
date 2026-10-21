@@ -38,7 +38,7 @@ export class GoogleSheetsClient {
     const header = { alg: "RS256", typ: "JWT" };
     const claims = {
       iss: this.clientEmail,
-      scope: "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive",
+      scope: "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/documents",
       aud: "https://oauth2.googleapis.com/token",
       iat: now,
       exp: now + 3600,
@@ -152,6 +152,41 @@ export class GoogleSheetsClient {
     if (!valuesRes.ok) throw new Error(`Google Sheets isi nilai gagal (${valuesRes.status}): ${await valuesRes.text()}`);
 
     return { spreadsheetId, url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit` };
+  }
+
+  /**
+   * Creates a new Google Doc titled `title`, with `content` as its plain
+   * body text, directly inside `parentFolderId` - "simpan ringkasan rapat
+   * ke Google Drive, buat folder baru topik dan tanggal rapat".
+   *
+   * Same two-step pattern as createSpreadsheet and for the same reason: a
+   * plain service account has zero Drive storage quota of its own, so the
+   * file is created via the DRIVE API (files.create with `parents` set up
+   * front, charged to the Shared Drive rather than the service account)
+   * and only then filled in via the Docs API, which has no Shared Drive
+   * flag of its own but works against any document the caller can edit.
+   */
+  async createDocument(title: string, content: string, parentFolderId: string): Promise<{ documentId: string; url: string }> {
+    const token = await this.getAccessToken();
+    const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+
+    const createRes = await fetch("https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ name: title, mimeType: "application/vnd.google-apps.document", parents: [parentFolderId] }),
+    });
+    if (!createRes.ok) throw new Error(`Google Drive buat dokumen gagal (${createRes.status}): ${await createRes.text()}`);
+    const created = (await createRes.json()) as { id: string };
+    const documentId = created.id;
+
+    const updateRes = await fetch(`https://docs.googleapis.com/v1/documents/${documentId}:batchUpdate`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ requests: [{ insertText: { location: { index: 1 }, text: content } }] }),
+    });
+    if (!updateRes.ok) throw new Error(`Google Docs isi konten gagal (${updateRes.status}): ${await updateRes.text()}`);
+
+    return { documentId, url: `https://docs.google.com/document/d/${documentId}/edit` };
   }
 
   /**

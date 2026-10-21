@@ -34,8 +34,8 @@ export const api = {
   pendingApprovals: () => request<any[]>("/approvals/pending"),
   /** Arsip - approval yang sudah diputuskan (disetujui/ditolak). */
   decidedApprovals: () => request<any[]>("/approvals/decided"),
-  decideApproval: (id: string, status: "APPROVED" | "REJECTED", approverRef: string, notes?: string) =>
-    request(`/approvals/${id}/decide`, { method: "PATCH", body: JSON.stringify({ status, approverRef, notes }) }),
+  decideApproval: (id: string, status: "APPROVED" | "REJECTED", approverRef: string, notes?: string, attachmentIds?: string[]) =>
+    request(`/approvals/${id}/decide`, { method: "PATCH", body: JSON.stringify({ status, approverRef, notes, attachmentIds }) }),
   createTask: (payload: {
     divisionSlug: string;
     title: string;
@@ -44,7 +44,7 @@ export const api = {
     requiresApproval?: boolean;
     projectId?: string;
     dueAt?: string;
-    attachmentId?: string;
+    attachmentIds?: string[];
   }) => request<any>("/tasks", { method: "POST", body: JSON.stringify(payload) }),
   /**
    * "Kanban saya pengen bisa geser sendiri, Direktur punya hak penuh untuk
@@ -60,7 +60,7 @@ export const api = {
    * and the director's order is reserved to start the instant they free up
    * - never silently dropped.
    */
-  broadcastCommand: (payload: { agentIds: string[]; instruction: string; projectId?: string; dueAt?: string; attachmentId?: string }) =>
+  broadcastCommand: (payload: { agentIds: string[]; instruction: string; projectId?: string; dueAt?: string; attachmentIds?: string[] }) =>
     request<{
       dispatched: { agentId: string; agentName: string; taskId: string; queued: boolean }[];
       failed: { agentId: string; agentName: string; reason: string }[];
@@ -71,20 +71,21 @@ export const api = {
    * Plain conversation with one agent - the API classifies the message and
    * only creates a real Task (see `result.type === "task"`) when it reads
    * as an actual work order, so ordinary chat never shows up on the Task
-   * Board. `attachmentId` comes from `uploadFile` below - "di semua menu
-   * chat ada file upload, bisa berupa apapun".
+   * Board. `attachmentIds` come from `uploadFile` below - "di semua menu
+   * chat ada file upload, bisa dokumen atau folder".
    */
-  agentChat: (agentId: string, message: string, attachmentId?: string) =>
+  agentChat: (agentId: string, message: string, attachmentIds?: string[]) =>
     request<
       | { type: "chat"; reply: string }
       | { type: "task"; taskId: string; title: string; queued: boolean; note: string }
-    >(`/agents/${agentId}/chat`, { method: "POST", body: JSON.stringify({ message, attachmentId }) }),
+    >(`/agents/${agentId}/chat`, { method: "POST", body: JSON.stringify({ message, attachmentIds }) }),
   /**
    * Uploads a file of any type to the shared attachment store and returns
-   * its id - pass that id as `attachmentId` to agentChat/createTask/
-   * broadcastCommand to fold it into that message. Text-like files (txt,
-   * md, csv, json…) are read into the agent's context; anything else is
-   * still stored and downloadable via the returned `url`, just not parsed.
+   * its id - pass that id (or several, for a folder - one call per file) as
+   * `attachmentIds` to agentChat/createTask/broadcastCommand/etc to fold it
+   * into that message. Text-like files (txt, md, csv, json…) are read into
+   * the agent's context; anything else is still stored and downloadable via
+   * the returned `url`, just not parsed.
    */
   uploadFile: async (file: File) => {
     const form = new FormData();
@@ -93,8 +94,8 @@ export const api = {
     if (!res.ok) throw new Error(`API /uploads failed: ${res.status}`);
     return res.json() as Promise<{ id: string; filename: string; mimeType: string; size: number; url: string }>;
   },
-  createProject: (name: string, description?: string) =>
-    request<any>("/projects", { method: "POST", body: JSON.stringify({ name, description }) }),
+  createProject: (name: string, description?: string, attachmentIds?: string[]) =>
+    request<any>("/projects", { method: "POST", body: JSON.stringify({ name, description, attachmentIds }) }),
   /**
    * Same-origin link to the task's result as a PDF, streamed by the API
    * itself (MinIO has no public port) - 404s until the worker has produced
@@ -129,9 +130,9 @@ export const api = {
   openQuestions: () => request<any[]>("/questions/open"),
   /** Arsip - pertanyaan yang sudah dijawab (atau repo-request yang sudah dikonfirmasi). */
   archivedQuestions: () => request<any[]>("/questions/archived"),
-  /** `attachmentId` from `uploadFile` - "setiap pertanyaan juga ada attachment filenya". */
-  answerQuestion: (id: string, answer: string, attachmentId?: string) =>
-    request<any>(`/questions/${id}/answer`, { method: "PATCH", body: JSON.stringify({ answer, attachmentId }) }),
+  /** `attachmentIds` from `uploadFile` - "setiap pertanyaan juga ada attachment filenya, bisa dokumen atau folder". */
+  answerQuestion: (id: string, answer: string, attachmentIds?: string[]) =>
+    request<any>(`/questions/${id}/answer`, { method: "PATCH", body: JSON.stringify({ answer, attachmentIds }) }),
   /** Director confirms a repo-request question - records which GitHub repo the project now commits to, and resumes the paused task. */
   confirmRepo: (id: string, repoName: string) =>
     request<any>(`/questions/${id}/confirm-repo`, { method: "PATCH", body: JSON.stringify({ repoName }) }),
@@ -140,14 +141,15 @@ export const api = {
    * role name (+ optional responsibilities); tier and the agent's display
    * name are inferred/generated server-side.
    */
-  quickAddPersonnel: (divisionSlug: string, roleName: string, responsibilities?: string) =>
+  quickAddPersonnel: (divisionSlug: string, roleName: string, responsibilities?: string, attachmentIds?: string[]) =>
     request<{ role: any; agent: any }>(`/divisions/${divisionSlug}/personnel`, {
       method: "POST",
-      body: JSON.stringify({ roleName, responsibilities }),
+      body: JSON.stringify({ roleName, responsibilities, attachmentIds }),
     }),
-  startOnboarding: (brief: string) => request<any>("/onboarding/start", { method: "POST", body: JSON.stringify({ brief }) }),
-  answerOnboarding: (sessionId: string, answer: string) =>
-    request<any>(`/onboarding/${sessionId}/answer`, { method: "POST", body: JSON.stringify({ answer }) }),
+  startOnboarding: (brief: string, attachmentIds?: string[]) =>
+    request<any>("/onboarding/start", { method: "POST", body: JSON.stringify({ brief, attachmentIds }) }),
+  answerOnboarding: (sessionId: string, answer: string, attachmentIds?: string[]) =>
+    request<any>(`/onboarding/${sessionId}/answer`, { method: "POST", body: JSON.stringify({ answer, attachmentIds }) }),
   confirmOnboarding: (sessionId: string, slug: string, name: string, description?: string) =>
     request<any>(`/onboarding/${sessionId}/confirm`, { method: "POST", body: JSON.stringify({ slug, name, description }) }),
 
@@ -158,16 +160,17 @@ export const api = {
   openDirectorCeoRoom: () => request<any>("/meetings/director-ceo", { method: "POST" }),
   createMeeting: (title: string, inviteAgentIds: string[]) =>
     request<any>("/meetings", { method: "POST", body: JSON.stringify({ title, inviteAgentIds }) }),
-  sendMeetingMessage: (id: string, content: string) =>
+  sendMeetingMessage: (id: string, content: string, attachmentIds?: string[]) =>
     request<{ messages: any[]; failures: { agentId: string; agentName: string; reason: string }[] }>(
       `/meetings/${id}/messages`,
-      { method: "POST", body: JSON.stringify({ content }) },
+      { method: "POST", body: JSON.stringify({ content, attachmentIds }) },
     ),
   inviteToMeeting: (id: string, agentId: string) =>
     request<any>(`/meetings/${id}/invite`, { method: "POST", body: JSON.stringify({ agentId }) }),
   closeMeeting: (id: string) => request<any>(`/meetings/${id}/close`, { method: "POST" }),
   /** "Dirangkum dulu dari hasil rapat" - draft title+description, nothing created yet. */
-  summarizeMeeting: (id: string) => request<{ title: string; description: string }>(`/meetings/${id}/summarize`, { method: "POST" }),
+  summarizeMeeting: (id: string) =>
+    request<{ title: string; description: string; driveUrl: string | null }>(`/meetings/${id}/summarize`, { method: "POST" }),
   /** "Lalu dijadikan task" - Director-approved summary becomes a real Task. */
   createTaskFromMeeting: (id: string, agentId: string, title: string, description: string) =>
     request<{ taskId: string; queued: boolean }>(`/meetings/${id}/create-task`, {

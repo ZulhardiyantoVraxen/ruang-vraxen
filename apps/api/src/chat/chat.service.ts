@@ -49,14 +49,13 @@ export class ChatService {
    * files read verbatim, anything else just described) - the same way an
    * attachment shows up inline in a Claude conversation.
    */
-  async send(agentId: string, message: string, attachmentId?: string): Promise<ChatResult> {
+  async send(agentId: string, message: string, attachmentIds: string[] = []): Promise<ChatResult> {
     const agent = await this.prisma.agent.findUniqueOrThrow({
       where: { id: agentId },
       include: { agentRole: { include: { modelClass: true, division: true } } },
     });
 
-    const attachmentNote = attachmentId ? `\n\n📎 Lampiran: ${this.uploads.filenameFromId(attachmentId)} (/uploads/${attachmentId})` : "";
-    const storedMessage = `${message}${attachmentNote}`;
+    const storedMessage = `${message}${this.uploads.noteForIds(attachmentIds)}`;
     await this.prisma.chatMessage.create({ data: { agentId, role: "DIRECTOR", content: storedMessage } });
 
     const recent = await this.prisma.chatMessage.findMany({
@@ -66,7 +65,7 @@ export class ChatService {
     });
     const history = recent.reverse(); // oldest first, includes the message we just stored
 
-    const attachmentForModel = attachmentId ? await this.uploads.describeForPrompt(attachmentId) : null;
+    const attachmentForModel = await this.uploads.describeManyForPrompt(attachmentIds);
     // "Agent juga bisa membaca dari link yang saya berikan" - any URL typed
     // straight into the message gets fetched too, same as an attachment.
     const linksForModel = await this.linkReader.describeLinksInText(message);

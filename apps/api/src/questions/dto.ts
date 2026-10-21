@@ -1,4 +1,4 @@
-import { IsOptional, IsString } from "class-validator";
+import { IsArray, IsOptional, IsString } from "class-validator";
 
 /** Worker's own write path when a PM/decision-point executor needs the director's input - see QuestionsService.ask. */
 export class AskDirectorDto {
@@ -11,8 +11,8 @@ export class AskDirectorDto {
 export class AnswerDirectorQuestionDto {
   @IsString() answer!: string;
   @IsOptional() @IsString() approverRef?: string;
-  /** Id returned by POST /uploads - "setiap pertanyaan juga ada attachment filenya". */
-  @IsOptional() @IsString() attachmentId?: string;
+  /** Ids returned by POST /uploads (one per file - a folder upload is just several) - "setiap pertanyaan juga ada attachment filenya". */
+  @IsOptional() @IsArray() @IsString({ each: true }) attachmentIds?: string[];
 }
 
 /**

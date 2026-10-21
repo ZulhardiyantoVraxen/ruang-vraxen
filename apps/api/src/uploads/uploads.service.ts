@@ -68,6 +68,27 @@ export class UploadsService {
    * storage, so callers (chat, broadcast command, direct task) never have
    * to carry upload metadata around themselves.
    */
+  /**
+   * "Setiap input ada lampiran, bisa dokumen atau folder" - a folder upload
+   * is just several files uploaded one by one (the browser hands over a
+   * flat FileList either way), so every surface that used to carry one
+   * `attachmentId` now carries `attachmentIds: string[]` instead - these two
+   * helpers are the array-aware version of the note/describe pair every
+   * caller used to build by hand for a single id.
+   */
+  noteForIds(ids: string[]): string {
+    if (ids.length === 0) return "";
+    if (ids.length === 1) return `\n\n📎 Lampiran: ${this.filenameFromId(ids[0])} (/uploads/${ids[0]})`;
+    const lines = ids.map((id) => `- ${this.filenameFromId(id)} (/uploads/${id})`).join("\n");
+    return `\n\n📎 Lampiran (${ids.length} file):\n${lines}`;
+  }
+
+  async describeManyForPrompt(ids: string[]): Promise<string | null> {
+    if (ids.length === 0) return null;
+    const blocks = await Promise.all(ids.map((id) => this.describeForPrompt(id)));
+    return blocks.join("\n\n");
+  }
+
   async describeForPrompt(id: string): Promise<string> {
     const filename = this.filenameFromId(id);
     try {

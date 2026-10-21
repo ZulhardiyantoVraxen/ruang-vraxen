@@ -15,7 +15,10 @@ export class ApprovalsController {
   }
 
   @Patch(":id/decide")
-  decide(@Param("id") id: string, @Body() body: { status: "APPROVED" | "REJECTED"; approverRef: string; notes?: string }) {
-    return this.service.decide(id, body.status, body.approverRef, body.notes);
+  decide(
+    @Param("id") id: string,
+    @Body() body: { status: "APPROVED" | "REJECTED"; approverRef: string; notes?: string; attachmentIds?: string[] },
+  ) {
+    return this.service.decide(id, body.status, body.approverRef, body.notes, body.attachmentIds ?? []);
   }
 }

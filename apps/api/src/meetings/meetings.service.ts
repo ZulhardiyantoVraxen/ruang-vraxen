@@ -3,6 +3,10 @@ import { PrismaService } from "../prisma/prisma.service";
 import { OpenRouterService } from "../model-routing/openrouter.service";
 import { UsageService } from "../usage/usage.service";
 import { TasksService } from "../tasks/tasks.service";
+import { UploadsService } from "../uploads/uploads.service";
+import { LinkReaderService } from "../common/link-reader.service";
+import { ObjectStorageService } from "../storage/object-storage.service";
+import { GoogleSheetsClient } from "@platform/shared";
 import { MeetingRoomType, MeetingRoomStatus, Prisma } from "@prisma/client";
 
 const AGENT_WITH_ROLE = {
@@ -56,7 +60,56 @@ export class MeetingsService {
     private readonly modelRouting: OpenRouterService,
     private readonly usage: UsageService,
     private readonly tasks: TasksService,
+    private readonly uploads: UploadsService,
+    private readonly linkReader: LinkReaderService,
+    private readonly storage: ObjectStorageService,
   ) {}
+
+  /**
+   * "Simpan ringkasan rapat ke Google Drive, buat folder baru topik dan
+   * tanggal rapat" - Drive/Docs/folder structure:
+   *   <projectsRootFolderId> / "Rapat" / "<judul rapat> - <tanggal>" / "Ringkasan - <jam>"
+   * Best-effort and fail-open, same philosophy as the Finance budget sheet
+   * integration this reuses GoogleSheetsClient from: with no GOOGLE_* env
+   * vars configured, this silently returns null and summarize() still works
+   * (title/description are always saved to the DB either way) - never let a
+   * missing Drive integration block the Director from getting a summary.
+   */
+  private async saveSummaryToDrive(room: { id: string; title: string }, title: string, description: string): Promise<string | null> {
+    const serviceAccountEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+    const privateKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY;
+    const rootFolderId = process.env.GOOGLE_DRIVE_PROJECTS_ROOT_FOLDER_ID;
+    if (!serviceAccountEmail || !privateKey || !rootFolderId) return null;
+
+    try {
+      const drive = new GoogleSheetsClient({ clientEmail: serviceAccountEmail, privateKey });
+
+      // "Rapat" root folder, cached so repeat summaries never re-search/re-create it.
+      const rapatRootKey = "meetings/drive-rapat-root-folder.json";
+      let rapatRootId = (await this.storage.getJson<{ folderId: string }>(rapatRootKey))?.folderId;
+      if (!rapatRootId) {
+        rapatRootId = (await drive.findFolderByName("Rapat", rootFolderId)) ?? (await drive.createFolder("Rapat", rootFolderId));
+        await this.storage.putJson(rapatRootKey, { folderId: rapatRootId });
+      }
+
+      // One subfolder per room per calendar day ("topik dan tanggal rapat") - cached per room+day.
+      const dateLabel = new Intl.DateTimeFormat("id-ID", { day: "2-digit", month: "short", year: "numeric" }).format(new Date());
+      const dayFolderName = `${room.title} - ${dateLabel}`;
+      const dayFolderKey = `meetings/${room.id}/drive-day-folder-${dateLabel.replace(/\s+/g, "-")}.json`;
+      let dayFolderId = (await this.storage.getJson<{ folderId: string }>(dayFolderKey))?.folderId;
+      if (!dayFolderId) {
+        dayFolderId = (await drive.findFolderByName(dayFolderName, rapatRootId)) ?? (await drive.createFolder(dayFolderName, rapatRootId));
+        await this.storage.putJson(dayFolderKey, { folderId: dayFolderId });
+      }
+
+      const timeLabel = new Intl.DateTimeFormat("id-ID", { hour: "2-digit", minute: "2-digit" }).format(new Date());
+      const doc = await drive.createDocument(`Ringkasan - ${timeLabel}`, `${title}\n\n${description}`, dayFolderId);
+      return doc.url;
+    } catch (err) {
+      this.logger.error(`Gagal menyimpan ringkasan rapat ${room.id} ke Google Drive:`, err);
+      return null;
+    }
+  }
 
   list(status?: string) {
     return this.prisma.meetingRoom.findMany({
@@ -169,7 +222,8 @@ export class MeetingsService {
    * same round - returns every message created during this call (the
    * Director's own plus each reply that succeeded).
    */
-  async sendMessage(roomId: string, content: string) {
+  /** "Setiap input ada lampiran" - a message posted into a meeting can carry files too (one or many, same as a folder upload elsewhere). */
+  async sendMessage(roomId: string, content: string, attachmentIds: string[] = []) {
     const room = await this.prisma.meetingRoom.findUnique({
       where: { id: roomId },
       include: { participants: { include: { agent: { include: AGENT_WITH_ROLE } } } },
@@ -177,12 +231,22 @@ export class MeetingsService {
     if (!room) throw new NotFoundException(`Meeting room ${roomId} tidak ditemukan`);
     if (room.status !== "ACTIVE") throw new BadRequestException("Rapat ini sudah ditutup");
 
+    const storedContent = `${content}${this.uploads.noteForIds(attachmentIds)}`;
     const created = [
       await this.prisma.meetingMessage.create({
-        data: { meetingRoomId: roomId, senderType: "DIRECTOR", content },
+        data: { meetingRoomId: roomId, senderType: "DIRECTOR", content: storedContent },
       }),
     ];
     const failures: { agentId: string; agentName: string; reason: string }[] = [];
+
+    // Full attachment content (+ any URL typed into the message) is only
+    // injected into THIS round's model calls, not re-stored on every future
+    // transcript fetch - same split as chat's attachmentForModel/storedMessage.
+    const extrasForModel = (
+      await Promise.all([this.uploads.describeManyForPrompt(attachmentIds), this.linkReader.describeLinksInText(content)])
+    )
+      .filter((x): x is string => Boolean(x))
+      .join("\n\n");
 
     for (const participant of room.participants) {
       const agent = participant.agent;
@@ -209,7 +273,7 @@ Kamu sedang rapat berjudul "${room.title}" bersama Direktur${otherParticipants ?
 Berikut transkrip rapat sejauh ini (urut dari lama ke baru):
 
 ${transcriptText}
-
+${extrasForModel ? `\nLampiran/konten tambahan dari pesan terakhir Direktur:\n${extrasForModel}\n` : ""}
 Berikan tanggapanmu sebagai ${agent.displayName} terhadap perkembangan terbaru di atas - singkat, relevan dengan peranmu, dan dalam Bahasa Indonesia. Kalau tidak ada yang perlu kamu tambahkan dari sisi perananmu, cukup bilang itu secara singkat (jangan mengulang pendapat yang sudah disampaikan orang lain). Balas sebagai teks natural biasa - jangan pernah balas dalam format JSON.`;
 
       try {
@@ -294,17 +358,34 @@ Ringkas hasil rapat ini menjadi draft satu pekerjaan (task) yang bisa ditugaskan
     );
 
     const unfenced = result.content.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+    let draft: { title: string; description: string };
     try {
       const parsed = JSON.parse(unfenced);
-      if (typeof parsed?.title === "string") {
-        return { title: parsed.title, description: typeof parsed.description === "string" ? parsed.description : result.content };
-      }
+      draft =
+        typeof parsed?.title === "string"
+          ? { title: parsed.title, description: typeof parsed.description === "string" ? parsed.description : result.content }
+          : { title: room.title, description: result.content };
     } catch {
-      // Model didn't return clean JSON - fall through to the raw-text fallback below.
+      // Model didn't return clean JSON - harmless raw-text fallback; the
+      // Director edits this in the UI before creating anything anyway.
+      draft = { title: room.title, description: result.content };
     }
-    // Harmless fallback: the Director edits this in the UI before creating
-    // anything anyway, so an imperfect parse never blocks the flow.
-    return { title: room.title, description: result.content };
+
+    // "Setiap card rapat ada ringkasan" - persisted so the /meetings list can
+    // show it without the Director having to open the room; Drive save is
+    // best-effort on top (null when GOOGLE_* env vars aren't configured).
+    const driveUrl = await this.saveSummaryToDrive(room, draft.title, draft.description);
+    await this.prisma.meetingRoom.update({
+      where: { id: roomId },
+      data: {
+        lastSummaryTitle: draft.title,
+        lastSummaryText: draft.description,
+        lastSummaryAt: new Date(),
+        lastSummaryDriveUrl: driveUrl,
+      },
+    });
+
+    return { ...draft, driveUrl };
   }
 
   /** Director-approved: turns a (possibly edited) summary into a real Task, assigned to the chosen participant. */

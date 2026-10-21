@@ -24,8 +24,8 @@ export class CreateTaskDto {
   @IsOptional() @IsBoolean() requiresApproval?: boolean;
   @IsOptional() @IsString() projectId?: string; // group this task under a director-visible Project
   @IsOptional() @IsDateString() dueAt?: string; // deadline shown on the Task Board card
-  /** Id returned by POST /uploads - appended to the task description before dispatch. */
-  @IsOptional() @IsString() attachmentId?: string;
+  /** Ids returned by POST /uploads (one per file - a folder upload is just several) - appended to the task description before dispatch. */
+  @IsOptional() @IsArray() @IsString({ each: true }) attachmentIds?: string[];
 }
 
 /** Chief of Staff's own routing decision - which division/agent actually gets the task. */
@@ -56,8 +56,8 @@ export class BroadcastCommandDto {
   @IsString() instruction!: string;
   @IsOptional() @IsString() projectId?: string;
   @IsOptional() @IsDateString() dueAt?: string;
-  /** Id returned by POST /uploads - appended to the instruction before dispatch. */
-  @IsOptional() @IsString() attachmentId?: string;
+  /** Ids returned by POST /uploads (one per file - a folder upload is just several) - appended to the instruction before dispatch. */
+  @IsOptional() @IsArray() @IsString({ each: true }) attachmentIds?: string[];
 }
 
 /**

@@ -21,16 +21,17 @@ export class TasksController {
    * menu chat ada file upload" + "agent juga bisa membaca dari link yang
    * saya berikan".
    */
-  private async withExtras(text: string, attachmentId?: string): Promise<string> {
+  private async withExtras(text: string, attachmentIds?: string[]): Promise<string> {
     const parts = [text];
-    if (attachmentId) parts.push(await this.uploads.describeForPrompt(attachmentId));
+    const attached = await this.uploads.describeManyForPrompt(attachmentIds ?? []);
+    if (attached) parts.push(attached);
     const links = await this.linkReader.describeLinksInText(text);
     if (links) parts.push(links);
     return parts.filter(Boolean).join("\n\n");
   }
 
   @Post() async create(@Body() dto: CreateTaskDto) {
-    const description = await this.withExtras(dto.description ?? "", dto.attachmentId);
+    const description = await this.withExtras(dto.description ?? "", dto.attachmentIds);
     return this.service.create({ ...dto, description: description || undefined });
   }
 
@@ -45,7 +46,7 @@ export class TasksController {
 
   /** "Perintah sekaligus" from the office view - one instruction, several agents at once. */
   @Post("broadcast") async broadcast(@Body() dto: BroadcastCommandDto) {
-    const instruction = await this.withExtras(dto.instruction, dto.attachmentId);
+    const instruction = await this.withExtras(dto.instruction, dto.attachmentIds);
     return this.service.broadcast({ ...dto, instruction });
   }
 

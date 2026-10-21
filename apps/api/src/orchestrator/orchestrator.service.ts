@@ -4,6 +4,7 @@ import { KafkaService } from "../kafka/kafka.service";
 import { OpenRouterService } from "../model-routing/openrouter.service";
 import { TOPICS, RosterProposal } from "@platform/shared";
 import { ORCHESTRATOR_SYSTEM_PROMPT } from "./orchestrator.prompt";
+import { UploadsService } from "../uploads/uploads.service";
 
 type OrchestratorReply =
   | { type: "question"; question: string }
@@ -43,12 +44,15 @@ export class OrchestratorService {
     private readonly prisma: PrismaService,
     private readonly kafka: KafkaService,
     private readonly openRouter: OpenRouterService,
+    private readonly uploads: UploadsService,
   ) {}
 
-  /** Kick off a new "create a division" conversation with an initial free-text brief. */
-  async start(brief: string) {
+  /** Kick off a new "create a division" conversation with an initial free-text brief. "Setiap input ada lampiran" - e.g. an org chart or compliance doc backing the brief. */
+  async start(brief: string, attachmentIds: string[] = []) {
+    const briefWithAttachments = `${brief}${this.uploads.noteForIds(attachmentIds)}`;
+    const attached = await this.uploads.describeManyForPrompt(attachmentIds);
     const session = await this.prisma.divisionOnboardingSession.create({
-      data: { qaLog: [{ question: null, answer: brief }] },
+      data: { qaLog: [{ question: null, answer: attached ? `${briefWithAttachments}\n\n${attached}` : briefWithAttachments }] },
     });
     await this.kafka.publish(TOPICS.DIVISION_EVENTS, {
       eventType: "division.onboarding.started",
@@ -60,13 +64,15 @@ export class OrchestratorService {
   }
 
   /** Answer the orchestrator's last question; it then asks the next one or recommends a roster. */
-  async answer(sessionId: string, answer: string) {
+  async answer(sessionId: string, answer: string, attachmentIds: string[] = []) {
     const session = await this.prisma.divisionOnboardingSession.findUniqueOrThrow({ where: { id: sessionId } });
     if (session.status !== "IN_PROGRESS") {
       throw new BadRequestException(`Session ${sessionId} is already ${session.status}`);
     }
+    const answerWithAttachments = `${answer}${this.uploads.noteForIds(attachmentIds)}`;
+    const attached = await this.uploads.describeManyForPrompt(attachmentIds);
     const qaLog = session.qaLog as any[];
-    qaLog[qaLog.length - 1] = { ...qaLog[qaLog.length - 1], answer };
+    qaLog[qaLog.length - 1] = { ...qaLog[qaLog.length - 1], answer: attached ? `${answerWithAttachments}\n\n${attached}` : answerWithAttachments };
     await this.prisma.divisionOnboardingSession.update({ where: { id: sessionId }, data: { qaLog } });
     await this.kafka.publish(TOPICS.DIVISION_EVENTS, {
       eventType: "division.onboarding.answered",

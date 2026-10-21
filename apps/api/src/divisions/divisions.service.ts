@@ -5,6 +5,7 @@ import { TOPICS, inferRoleCapability } from "@platform/shared";
 import { CreateAgentRoleDto, CreateDivisionDto, QuickAddPersonnelDto } from "./dto";
 import { OpenRouterService } from "../model-routing/openrouter.service";
 import { AgentsService } from "../agents/agents.service";
+import { UploadsService } from "../uploads/uploads.service";
 
 @Injectable()
 export class DivisionsService {
@@ -13,6 +14,7 @@ export class DivisionsService {
     private readonly kafka: KafkaService,
     private readonly openRouter: OpenRouterService,
     private readonly agents: AgentsService,
+    private readonly uploads: UploadsService,
   ) {}
 
   /** Every division (and its roster below) is a row, created at runtime - never hardcoded. */
@@ -135,13 +137,22 @@ export class DivisionsService {
 
     const displayName = await this.generatePersonnelName(dto.roleName, dto.responsibilities);
 
+    // "Setiap input ada lampiran" - e.g. a job description doc for the new role.
+    const attachmentIds = dto.attachmentIds ?? [];
+    const attached = await this.uploads.describeManyForPrompt(attachmentIds);
+    const responsibilitiesWithAttachments = dto.responsibilities
+      ? `${dto.responsibilities}${this.uploads.noteForIds(attachmentIds)}`
+      : this.uploads.noteForIds(attachmentIds) || undefined;
+
     const role = await this.prisma.agentRole.create({
       data: {
         divisionId: division.id,
         name: dto.roleName,
         tier,
         modelClassId: modelClass.id,
-        responsibilities: dto.responsibilities,
+        responsibilities: attached
+          ? `${responsibilitiesWithAttachments ?? ""}\n\n${attached}`.trim()
+          : responsibilitiesWithAttachments,
         maxConcurrentTasks: 1,
         requiresApproval: false,
       },

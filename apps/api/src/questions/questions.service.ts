@@ -123,15 +123,14 @@ export class QuestionsService {
 
   /**
    * Director answers - a question tied to a task hands that task straight
-   * back to the same agent to resume. `attachmentId` ("setiap pertanyaan
-   * juga ada attachment filenya") and any URL typed into the answer text
+   * back to the same agent to resume. `attachmentIds` ("setiap pertanyaan
+   * juga ada attachment filenya, bisa dokumen atau folder") and any URL typed into the answer text
    * ("agent juga bisa membaca dari link yang saya berikan") are both folded
    * into what the resumed agent actually sees, the same way chat does it -
    * the question record itself just keeps the short answer text.
    */
-  async answer(id: string, answer: string, approverRef?: string, attachmentId?: string) {
-    const attachmentNote = attachmentId ? `\n\n📎 Lampiran: ${this.uploads.filenameFromId(attachmentId)} (/uploads/${attachmentId})` : "";
-    const storedAnswer = `${answer}${attachmentNote}`;
+  async answer(id: string, answer: string, approverRef?: string, attachmentIds: string[] = []) {
+    const storedAnswer = `${answer}${this.uploads.noteForIds(attachmentIds)}`;
     const question = await this.prisma.directorQuestion.update({
       where: { id },
       data: { answer: storedAnswer, status: "ANSWERED", answeredAt: new Date() },
@@ -148,10 +147,7 @@ export class QuestionsService {
       // verbatim and any linked page fetched - not just the short reference
       // line kept on the question record itself.
       const extras = (
-        await Promise.all([
-          attachmentId ? this.uploads.describeForPrompt(attachmentId) : Promise.resolve(null),
-          this.linkReader.describeLinksInText(answer),
-        ])
+        await Promise.all([this.uploads.describeManyForPrompt(attachmentIds), this.linkReader.describeLinksInText(answer)])
       ).filter((x): x is string => Boolean(x));
       const answerForAgent = [answer, ...extras].join("\n\n");
       await this.prisma.task.update({

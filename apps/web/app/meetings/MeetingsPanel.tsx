@@ -14,12 +14,26 @@ type MeetingRoom = {
   title: string;
   status: "ACTIVE" | "CLOSED";
   participants: { agent: Agent }[];
+  lastSummaryTitle?: string | null;
+  lastSummaryText?: string | null;
+  lastSummaryAt?: string | null;
+  lastSummaryDriveUrl?: string | null;
 };
 
 function formatBadge(room: MeetingRoom) {
   if (room.status === "CLOSED") return { label: "Ditutup", cls: styles.badgeClosed };
-  if (room.type === "DIRECTOR_CEO") return { label: "Privat · Direktur & Staff Direksi", cls: styles.badgeDirectorCeo };
-  return { label: "Terbuka", cls: styles.badgeOpen };
+  if (room.type === "DIRECTOR_CEO") return { label: "Privat · Aktif", cls: styles.badgeDirectorCeo };
+  return { label: "Terbuka · Aktif", cls: styles.badgeOpen };
+}
+
+function formatTime(iso: string) {
+  try {
+    return new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(
+      new Date(iso),
+    );
+  } catch {
+    return iso;
+  }
 }
 
 /**
@@ -27,6 +41,11 @@ function formatBadge(room: MeetingRoom) {
  * diundang." The private room is a one-click standing fixture (idempotent -
  * opening it twice never creates a duplicate); open rooms are created ad hoc
  * per topic with whichever agents the Director picks from the full roster.
+ *
+ * "Setiap card ada ringkasan rapat dan status rapat" - both room types share
+ * the same card: a status badge, the full participant list, and (once
+ * "Rangkum rapat" has been used at least once) the latest summary snippet
+ * plus a link to the Google Doc it was saved to, if Drive is configured.
  */
 export default function MeetingsPanel({ initialRooms, divisions }: { initialRooms: MeetingRoom[]; divisions: Division[] }) {
   const [rooms, setRooms] = useState(initialRooms);
@@ -76,6 +95,40 @@ export default function MeetingsPanel({ initialRooms, divisions }: { initialRoom
     }
   }
 
+  function renderRoomCard(room: MeetingRoom) {
+    const badge = formatBadge(room);
+    return (
+      <a key={room.id} href={`/meetings/${room.id}`} className={styles.card}>
+        <p className={styles.cardTitle}>{room.title}</p>
+        <div className={styles.cardMeta}>
+          <span className={`${styles.badge} ${badge.cls}`}>{badge.label}</span>
+          <span>{room.participants.map((p) => p.agent.displayName).join(", ")}</span>
+        </div>
+        {room.lastSummaryText ? (
+          <div className={styles.cardSummary}>
+            <p className={styles.cardSummaryLabel}>
+              📋 Ringkasan terakhir{room.lastSummaryAt ? ` · ${formatTime(room.lastSummaryAt)}` : ""}
+            </p>
+            <p className={styles.cardSummaryText}>{room.lastSummaryText}</p>
+            {room.lastSummaryDriveUrl && (
+              <a
+                href={room.lastSummaryDriveUrl}
+                target="_blank"
+                rel="noreferrer"
+                className={styles.cardSummaryDriveLink}
+                onClick={(e) => e.stopPropagation()}
+              >
+                📄 Lihat di Google Drive
+              </a>
+            )}
+          </div>
+        ) : (
+          <p className={styles.cardSummaryEmpty}>Belum ada ringkasan - buka rapat ini dan pakai "Rangkum rapat & jadikan Task".</p>
+        )}
+      </a>
+    );
+  }
+
   return (
     <div className={styles.page}>
       <div className={styles.header}>
@@ -87,12 +140,7 @@ export default function MeetingsPanel({ initialRooms, divisions }: { initialRoom
       </p>
 
       {directorCeoRoom ? (
-        <a href={`/meetings/${directorCeoRoom.id}`} className={styles.card}>
-          <p className={styles.cardTitle}>{directorCeoRoom.title}</p>
-          <div className={styles.cardMeta}>
-            <span className={`${styles.badge} ${styles.badgeDirectorCeo}`}>Privat · Direktur &amp; Staff Direksi</span>
-          </div>
-        </a>
+        renderRoomCard(directorCeoRoom)
       ) : (
         <button className={styles.primaryButton} disabled={busy} onClick={openPrivateRoom} style={{ alignSelf: "flex-start" }}>
           {busy ? "Membuka…" : "🏛 Buka rapat privat dengan Staff Direksi"}
@@ -139,18 +187,7 @@ export default function MeetingsPanel({ initialRooms, divisions }: { initialRoom
 
       {openRooms.length === 0 && !showCreate && <p className={styles.empty}>Belum ada rapat terbuka yang berjalan.</p>}
 
-      {openRooms.map((room) => {
-        const badge = formatBadge(room);
-        return (
-          <a key={room.id} href={`/meetings/${room.id}`} className={styles.card}>
-            <p className={styles.cardTitle}>{room.title}</p>
-            <div className={styles.cardMeta}>
-              <span className={`${styles.badge} ${badge.cls}`}>{badge.label}</span>
-              <span>{room.participants.map((p) => p.agent.displayName).join(", ")}</span>
-            </div>
-          </a>
-        );
-      })}
+      {openRooms.map(renderRoomCard)}
     </div>
   );
 }

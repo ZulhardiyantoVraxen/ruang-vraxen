@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { api } from "@/lib/api";
+import { AttachmentPicker, PendingAttachment } from "../../components/AttachmentPicker";
 import styles from "../meetings.module.css";
 
 type Agent = { id: string; displayName: string; status: string };
@@ -44,6 +45,29 @@ export default function MeetingRoomPanel({ initialRoom }: { initialRoom: Room })
   const [sending, setSending] = useState(false);
   const [failures, setFailures] = useState<{ agentId: string; agentName: string; reason: string }[]>([]);
 
+  // "Setiap input ada lampiran" - a message posted into the meeting can carry
+  // a document or a whole folder, same attach-then-send pattern as everywhere else.
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  const [uploading, setUploading] = useState(false);
+
+  async function attachFiles(files: File[]) {
+    if (files.length === 0) return;
+    setUploading(true);
+    try {
+      const results = await Promise.allSettled(files.map((f) => api.uploadFile(f)));
+      const uploaded = results
+        .filter((r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof api.uploadFile>>> => r.status === "fulfilled")
+        .map((r) => ({ id: r.value.id, filename: r.value.filename }));
+      setAttachments((prev) => [...prev, ...uploaded]);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function removeAttachment(id: string) {
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
+  }
+
   // "Dirangkum dulu dari hasil rapat, lalu dijadikan task" - a draft the
   // Director reviews/edits before anything is actually created; nothing
   // here touches the Task Board until "Buat Task" is pressed.
@@ -59,8 +83,10 @@ export default function MeetingRoomPanel({ initialRoom }: { initialRoom: Room })
     if (!content || sending) return;
     setSending(true);
     setDraft("");
+    const attachmentIds = attachments.map((a) => a.id);
+    setAttachments([]);
     try {
-      const result = await api.sendMeetingMessage(room.id, content);
+      const result = await api.sendMeetingMessage(room.id, content, attachmentIds);
       setRoom((prev) => ({ ...prev, messages: [...prev.messages, ...result.messages] }));
       setFailures(result.failures);
     } catch {
@@ -185,22 +211,31 @@ export default function MeetingRoomPanel({ initialRoom }: { initialRoom: Room })
       )}
 
       {isActive ? (
-        <div className={styles.composer}>
-          <textarea
-            className={styles.composerBox}
-            placeholder="Ketik sebagai Direktur... (semua peserta akan menanggapi)"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                send();
-              }
-            }}
+        <div className={styles.composer} style={{ flexDirection: "column", alignItems: "stretch", gap: 8 }}>
+          <AttachmentPicker
+            items={attachments}
+            uploading={uploading}
+            onAddFiles={attachFiles}
+            onRemove={removeAttachment}
+            idPrefix={`meeting-${room.id}`}
           />
-          <button className={styles.primaryButton} disabled={sending || !draft.trim()} onClick={send}>
-            {sending ? "Mengirim…" : "Kirim"}
-          </button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <textarea
+              className={styles.composerBox}
+              placeholder="Ketik sebagai Direktur... (semua peserta akan menanggapi)"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  send();
+                }
+              }}
+            />
+            <button className={styles.primaryButton} disabled={sending || !draft.trim()} onClick={send}>
+              {sending ? "Mengirim…" : "Kirim"}
+            </button>
+          </div>
         </div>
       ) : (
         <p className={styles.empty}>Rapat ini sudah ditutup.</p>

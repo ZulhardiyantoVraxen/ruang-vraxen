@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import ExpandableText from "../components/ExpandableText";
+import { AttachmentPicker, PendingAttachment } from "../components/AttachmentPicker";
 import styles from "./approvals.module.css";
 
 type Approval = {
@@ -49,6 +50,28 @@ export default function ApprovalsPanel({ initial }: { initial: Approval[] }) {
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // "Setiap input ada lampiran" - a decision note can carry a file too.
+  const [attachments, setAttachments] = useState<Record<string, PendingAttachment[]>>({});
+  const [uploadingId, setUploadingId] = useState<string | null>(null);
+
+  async function attachFiles(id: string, files: File[]) {
+    if (files.length === 0) return;
+    setUploadingId(id);
+    try {
+      const results = await Promise.allSettled(files.map((f) => api.uploadFile(f)));
+      const uploaded = results
+        .filter((r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof api.uploadFile>>> => r.status === "fulfilled")
+        .map((r) => ({ id: r.value.id, filename: r.value.filename }));
+      setAttachments((prev) => ({ ...prev, [id]: [...(prev[id] ?? []), ...uploaded] }));
+    } finally {
+      setUploadingId(null);
+    }
+  }
+
+  function removeAttachment(id: string, attachmentId: string) {
+    setAttachments((prev) => ({ ...prev, [id]: (prev[id] ?? []).filter((a) => a.id !== attachmentId) }));
+  }
 
   // "Dikelompokkan berdasarkan topik" (= divisi), sama seperti Pertanyaan -
   // "all" | "archive" | division slug (atau UNGROUPED untuk task tanpa divisi).
@@ -98,8 +121,13 @@ export default function ApprovalsPanel({ initial }: { initial: Approval[] }) {
     setBusyId(id);
     setError(null);
     try {
-      await api.decideApproval(id, status, "Direktur", notes[id]?.trim() || undefined);
+      await api.decideApproval(id, status, "Direktur", notes[id]?.trim() || undefined, (attachments[id] ?? []).map((a) => a.id));
       setApprovals((prev) => prev.filter((a) => a.id !== id));
+      setAttachments((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Gagal memproses keputusan.");
     } finally {
@@ -211,6 +239,13 @@ export default function ApprovalsPanel({ initial }: { initial: Approval[] }) {
                 value={notes[a.id] ?? ""}
                 onChange={(e) => setNotes((prev) => ({ ...prev, [a.id]: e.target.value }))}
                 rows={2}
+              />
+              <AttachmentPicker
+                items={attachments[a.id] ?? []}
+                uploading={uploadingId === a.id}
+                onAddFiles={(files) => attachFiles(a.id, files)}
+                onRemove={(attId) => removeAttachment(a.id, attId)}
+                idPrefix={`approval-${a.id}`}
               />
 
               <div className={styles.actions}>

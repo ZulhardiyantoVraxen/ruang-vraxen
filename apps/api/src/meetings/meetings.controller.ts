@@ -25,7 +25,7 @@ export class MeetingsController {
   }
 
   @Post(":id/messages") send(@Param("id") id: string, @Body() dto: SendMeetingMessageDto) {
-    return this.service.sendMessage(id, dto.content);
+    return this.service.sendMessage(id, dto.content, dto.attachmentIds ?? []);
   }
 
   @Post(":id/invite") invite(@Param("id") id: string, @Body() dto: InviteToMeetingDto) {

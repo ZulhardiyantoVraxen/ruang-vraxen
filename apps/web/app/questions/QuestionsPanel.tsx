@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import ExpandableText from "../components/ExpandableText";
+import { AttachmentPicker, PendingAttachment } from "../components/AttachmentPicker";
 import styles from "./questions.module.css";
 
 type Question = {
@@ -101,22 +102,29 @@ export default function QuestionsPanel({ initial }: { initial: Question[] }) {
   const visible =
     activeTopic === "archive" ? archived ?? [] : activeTopic === "all" ? questions : questions.filter((q) => q.division.slug === activeTopic);
 
-  // "Setiap pertanyaan juga ada attachment filenya" - same attach-then-send
-  // pattern as the chat/perintah surfaces: picking a file uploads it right
-  // away, and the id sits here until the answer is actually sent.
-  const [attachments, setAttachments] = useState<Record<string, { id: string; filename: string }>>({});
+  // "Setiap pertanyaan juga ada attachment filenya, bisa dokumen atau
+  // folder" - same attach-then-send pattern as every other input surface:
+  // picking file(s) or a whole folder uploads them right away, and the ids
+  // sit here until the answer is actually sent.
+  const [attachments, setAttachments] = useState<Record<string, PendingAttachment[]>>({});
   const [uploadingId, setUploadingId] = useState<string | null>(null);
 
-  async function attach(id: string, file: File) {
+  async function attachFiles(id: string, files: File[]) {
+    if (files.length === 0) return;
     setUploadingId(id);
     try {
-      const res = await api.uploadFile(file);
-      setAttachments((prev) => ({ ...prev, [id]: { id: res.id, filename: res.filename } }));
-    } catch {
-      // leave no attachment rather than blocking the answer box
+      const results = await Promise.allSettled(files.map((f) => api.uploadFile(f)));
+      const uploaded = results
+        .filter((r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof api.uploadFile>>> => r.status === "fulfilled")
+        .map((r) => ({ id: r.value.id, filename: r.value.filename }));
+      setAttachments((prev) => ({ ...prev, [id]: [...(prev[id] ?? []), ...uploaded] }));
     } finally {
       setUploadingId(null);
     }
+  }
+
+  function removeAttachment(id: string, attachmentId: string) {
+    setAttachments((prev) => ({ ...prev, [id]: (prev[id] ?? []).filter((a) => a.id !== attachmentId) }));
   }
 
   async function answer(id: string) {
@@ -124,7 +132,7 @@ export default function QuestionsPanel({ initial }: { initial: Question[] }) {
     if (!text) return;
     setBusyId(id);
     try {
-      await api.answerQuestion(id, text, attachments[id]?.id);
+      await api.answerQuestion(id, text, (attachments[id] ?? []).map((a) => a.id));
       setQuestions((prev) => prev.filter((q) => q.id !== id));
       setAttachments((prev) => {
         const next = { ...prev };
@@ -280,32 +288,14 @@ export default function QuestionsPanel({ initial }: { initial: Question[] }) {
                   value={drafts[q.id] ?? ""}
                   onChange={(e) => setDrafts((prev) => ({ ...prev, [q.id]: e.target.value }))}
                 />
+                <AttachmentPicker
+                  items={attachments[q.id] ?? []}
+                  uploading={uploadingId === q.id}
+                  onAddFiles={(files) => attachFiles(q.id, files)}
+                  onRemove={(attId) => removeAttachment(q.id, attId)}
+                  idPrefix={`question-${q.id}`}
+                />
                 <div className={styles.answerRow}>
-                  <label className={styles.answerButton} style={{ cursor: "pointer", background: "transparent" }}>
-                    {uploadingId === q.id ? "Mengunggah…" : "📎 Lampirkan file"}
-                    <input
-                      type="file"
-                      style={{ display: "none" }}
-                      disabled={uploadingId === q.id}
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) attach(q.id, file);
-                        e.target.value = "";
-                      }}
-                    />
-                  </label>
-                  {attachments[q.id] && (
-                    <span className={styles.metaText}>
-                      {attachments[q.id].filename}{" "}
-                      <button
-                        type="button"
-                        onClick={() => setAttachments((prev) => { const next = { ...prev }; delete next[q.id]; return next; })}
-                        style={{ background: "none", border: "none", color: "inherit", cursor: "pointer" }}
-                      >
-                        ✕
-                      </button>
-                    </span>
-                  )}
                   <button
                     className={styles.answerButton}
                     disabled={busyId === q.id || !(drafts[q.id] ?? "").trim()}

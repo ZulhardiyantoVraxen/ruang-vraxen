@@ -4,6 +4,7 @@ import { KafkaService } from "../kafka/kafka.service";
 import { TasksService } from "../tasks/tasks.service";
 import { TOPICS } from "@platform/shared";
 import { ROLE_NAMES } from "../common/role-names";
+import { UploadsService } from "../uploads/uploads.service";
 
 @Injectable()
 export class ApprovalsService {
@@ -11,6 +12,7 @@ export class ApprovalsService {
     private readonly prisma: PrismaService,
     private readonly kafka: KafkaService,
     private readonly tasks: TasksService,
+    private readonly uploads: UploadsService,
   ) {}
 
   /** The approval queue a human (or a PM role, per the artifact's chain) works through. */
@@ -32,10 +34,21 @@ export class ApprovalsService {
     });
   }
 
-  async decide(approvalId: string, status: "APPROVED" | "REJECTED", approverRef: string, notes?: string) {
+  async decide(
+    approvalId: string,
+    status: "APPROVED" | "REJECTED",
+    approverRef: string,
+    notes?: string,
+    attachmentIds: string[] = [],
+  ) {
+    // "Setiap input ada lampiran" - a note left on an approval decision can
+    // carry a file too (e.g. a signed sheet backing a rejection); folded
+    // straight into the stored notes text, same pattern as every other
+    // attachment-bearing input in the app.
+    const storedNotes = notes ? `${notes}${this.uploads.noteForIds(attachmentIds)}` : this.uploads.noteForIds(attachmentIds) || undefined;
     const approval = await this.prisma.approval.update({
       where: { id: approvalId },
-      data: { status, approverRef, notes, decidedAt: new Date() },
+      data: { status, approverRef, notes: storedNotes, decidedAt: new Date() },
     });
     const task = await this.prisma.task.update({
       where: { id: approval.taskId },

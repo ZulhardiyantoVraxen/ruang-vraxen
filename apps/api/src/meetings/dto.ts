@@ -8,6 +8,8 @@ export class CreateMeetingRoomDto {
 
 export class SendMeetingMessageDto {
   @IsString() @MinLength(1) content!: string;
+  /** Ids returned by POST /uploads (one per file - a folder upload is just several). */
+  @IsOptional() @IsArray() @IsString({ each: true }) attachmentIds?: string[];
 }
 
 export class InviteToMeetingDto {

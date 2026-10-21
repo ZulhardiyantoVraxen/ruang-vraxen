@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import ExpandableText from "../components/ExpandableText";
+import { AttachmentPicker, PendingAttachment } from "../components/AttachmentPicker";
 import styles from "./chiefOfStaff.module.css";
 
 type Agent = { id: string; displayName: string; status: string };
@@ -100,6 +101,24 @@ export default function ChiefOfStaffPanel({ pusat }: { pusat: Division | null })
     return role?.agents[0] ?? null;
   }, [pusat]);
 
+  // "Setiap input ada lampiran" - a direct order to Chief of Staff can carry a doc/folder too.
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  const [uploading, setUploading] = useState(false);
+
+  async function attachFiles(files: File[]) {
+    if (files.length === 0) return;
+    setUploading(true);
+    try {
+      const results = await Promise.allSettled(files.map((f) => api.uploadFile(f)));
+      const uploaded = results
+        .filter((r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof api.uploadFile>>> => r.status === "fulfilled")
+        .map((r) => ({ id: r.value.id, filename: r.value.filename }));
+      setAttachments((prev) => [...prev, ...uploaded]);
+    } finally {
+      setUploading(false);
+    }
+  }
+
   async function submit() {
     if (!title.trim() || !pusat) return;
     setBusy(true);
@@ -113,6 +132,7 @@ export default function ChiefOfStaffPanel({ pusat }: { pusat: Division | null })
         requiresApproval,
         projectId: projectId || undefined,
         dueAt: dueAt ? new Date(dueAt).toISOString() : undefined,
+        attachmentIds: attachments.map((a) => a.id),
       });
       setTasks((prev) => [task, ...prev]);
       setTitle("");
@@ -120,6 +140,7 @@ export default function ChiefOfStaffPanel({ pusat }: { pusat: Division | null })
       setPriority(3);
       setRequiresApproval(true);
       setDueAt("");
+      setAttachments([]);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Gagal mengirim pekerjaan.");
     } finally {
@@ -167,6 +188,13 @@ export default function ChiefOfStaffPanel({ pusat }: { pusat: Division | null })
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={4}
+            />
+            <AttachmentPicker
+              items={attachments}
+              uploading={uploading}
+              onAddFiles={attachFiles}
+              onRemove={(id) => setAttachments((prev) => prev.filter((a) => a.id !== id))}
+              idPrefix="chief-of-staff-task"
             />
           </div>
           <div className={styles.row}>
