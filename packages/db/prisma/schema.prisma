@@ -456,3 +456,31 @@ model DivisionOnboardingSession {
   createdAt           DateTime          @default(now())
   updatedAt           DateTime          @updatedAt
 }
+
+// --- Release ke Caddy -------------------------------------------------------
+
+// "Semua yang menghasilkan file script bisa langsung di-release ke Caddy" -
+// a static-site deployment: files are staged first (previewable via the API
+// before anything is public), then once the Direktur picks a subdomain and
+// points its DNS A record at this VPS, going live copies staging -> current
+// and asks the host-level Caddy helper to add a site block for it.
+enum ReleaseStatus {
+  STAGED      // files staged under releases-data/<slug>/staging, previewable, not public yet
+  PENDING_DNS // subdomain chosen, waiting for the DNS A record to actually resolve here
+  LIVE        // Caddy site block active, serving releases-data/<slug>/current
+}
+
+model Release {
+  id          String        @id @default(cuid())
+  title       String
+  slug        String        @unique
+  status      ReleaseStatus @default(STAGED)
+  sourceKind  String        // "zip" | "attachment" - how the files arrived (see ReleasesService)
+  subdomain   String?       @unique
+  liveUrl     String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  publishedAt DateTime?
+
+  @@index([status])
+}

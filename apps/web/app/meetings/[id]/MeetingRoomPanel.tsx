@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { api } from "@/lib/api";
 import { AttachmentPicker, PendingAttachment } from "../../components/AttachmentPicker";
+import { ReleaseAttachmentActions } from "../../components/ReleaseAttachmentAction";
 import styles from "../meetings.module.css";
 
 type Agent = { id: string; displayName: string; status: string };
@@ -149,6 +150,7 @@ export default function MeetingRoomPanel({ initialRoom }: { initialRoom: Room })
           <div key={m.id} className={`${styles.bubble} ${m.senderType === "DIRECTOR" ? styles.bubbleDirector : styles.bubbleAgent}`}>
             {m.senderType === "AGENT" && <span className={styles.bubbleMeta}>{m.senderAgent?.displayName}</span>}
             {m.content}
+            <ReleaseAttachmentActions content={m.content} />
           </div>
         ))}
         {failures.map((f) => (

@@ -1,0 +1,18 @@
+[Unit]
+Description=Caddy release helper (add/remove release site blocks on request from the api container)
+After=network.target caddy.service
+Requires=caddy.service
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile=/opt/ruang-vraxen/caddy-release-helper.env
+ExecStart=/usr/bin/node /opt/caddy-release-helper/server.js
+Restart=on-failure
+RestartSec=2
+# No extra sandboxing here (unlike caddy.service's ProtectSystem=full) -
+# this process's entire job is writing /etc/caddy/Caddyfile and reloading
+# caddy, both of which ProtectSystem=full would block.
+
+[Install]
+WantedBy=multi-user.target

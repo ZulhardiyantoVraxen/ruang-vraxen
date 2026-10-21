@@ -177,4 +177,44 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ agentId, title, description }),
     }),
+
+  // --- Release ke Caddy ("semua yang menghasilkan file script bisa langsung
+  // di-release") - stage (zip upload or an existing .html attachment from
+  // chat/rapat) -> preview -> pilih subdomain -> go-live setelah DNS siap.
+  listReleases: () => request<Release[]>("/releases"),
+  getRelease: (id: string) => request<Release>(`/releases/${id}`),
+  /** `file` for a zip upload, or `attachmentId` to reuse an existing chat/meeting .html attachment - pass exactly one. */
+  createRelease: async (title: string, source: { file?: File; attachmentId?: string }) => {
+    const form = new FormData();
+    form.append("title", title);
+    if (source.file) form.append("file", source.file);
+    if (source.attachmentId) form.append("attachmentId", source.attachmentId);
+    const res = await fetch(`${BASE}/releases`, { method: "POST", body: form });
+    if (!res.ok) throw new Error((await res.text().catch(() => "")) || `API /releases failed: ${res.status}`);
+    return res.json() as Promise<Release>;
+  },
+  /** Browser-only preview link - opens the staged site in a new tab before anything is public. */
+  releasePreviewUrl: (id: string) => `${BASE}/releases/${id}/preview`,
+  setReleaseSubdomain: (id: string, subdomain: string) =>
+    request<{ release: Release; dnsInstructions: { type: string; host: string; value: string } }>(
+      `/releases/${id}/subdomain`,
+      { method: "POST", body: JSON.stringify({ subdomain }) },
+    ),
+  checkReleaseDns: (id: string) =>
+    request<{ host: string; expected: string; records: string[]; matches: boolean }>(`/releases/${id}/check-dns`),
+  goLiveRelease: (id: string) => request<Release>(`/releases/${id}/go-live`, { method: "POST" }),
+  takeDownRelease: (id: string) => request<Release>(`/releases/${id}/take-down`, { method: "POST" }),
+};
+
+export type Release = {
+  id: string;
+  title: string;
+  slug: string;
+  status: "STAGED" | "PENDING_DNS" | "LIVE";
+  sourceKind: "zip" | "attachment";
+  subdomain: string | null;
+  liveUrl: string | null;
+  createdAt: string;
+  updatedAt: string;
+  publishedAt: string | null;
 };

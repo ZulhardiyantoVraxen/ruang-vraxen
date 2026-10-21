@@ -15,6 +15,7 @@
     "@nestjs/platform-express": "^10.4.0",
     "@platform/shared": "workspace:*",
     "@prisma/client": "^5.20.0",
+    "adm-zip": "^0.5.16",
     "kafkajs": "^2.2.4",
     "openai": "^4.68.0",
     "reflect-metadata": "^0.2.2",
@@ -24,6 +25,7 @@
   },
   "devDependencies": {
     "@nestjs/cli": "^10.4.0",
+    "@types/adm-zip": "^0.5.5",
     "@types/node": "^22.7.0",
     "@types/express": "^4.17.21",
     "typescript": "^5.6.0",

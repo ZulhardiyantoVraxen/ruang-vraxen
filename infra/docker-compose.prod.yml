@@ -95,6 +95,15 @@ services:
     mem_limit: 384m
     networks: [internal]
     ports: ["127.0.0.1:4000:4000"] # Caddy proxies to this; not reachable from outside the box directly
+    volumes:
+      # "Release ke Caddy" - the api container writes staged/live site files
+      # directly to the SAME absolute host path Caddy itself reads from (no
+      # path translation needed - see ReleasesService + infra/caddy-release-helper),
+      # and talks to the host-level helper (caddy-release-helper.service, root,
+      # outside Docker) over this bind-mounted Unix socket to add/remove Caddy
+      # site blocks - never anything broader than those two narrow operations.
+      - /opt/ruang-vraxen/releases-data:/opt/ruang-vraxen/releases-data
+      - /opt/ruang-vraxen/caddy-release-helper.sock:/opt/ruang-vraxen/caddy-release-helper.sock
 
   worker:
     image: ruang-worker:latest

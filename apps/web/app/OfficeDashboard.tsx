@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import ExpandableText from "./components/ExpandableText";
 import DigitalClock from "./components/DigitalClock";
 import { AttachmentPicker, PendingAttachment } from "./components/AttachmentPicker";
+import { ReleaseAttachmentActions } from "./components/ReleaseAttachmentAction";
 
 // The 3D scene pulls in three.js + @react-three/fiber, which is a sizeable
 // chunk of JS and needs a WebGL canvas - loaded only when the person
@@ -1025,6 +1026,7 @@ export default function OfficeDashboard({ divisions: initialDivisions, approvals
                   className={`${styles.modalChatBubble} ${m.role === "DIRECTOR" ? styles.modalChatBubbleMe : styles.modalChatBubbleAgent}`}
                 >
                   <ExpandableText text={m.content} lines={6} style={{ margin: 0 }} />
+                  <ReleaseAttachmentActions content={m.content} />
                 </div>
               ))}
             </div>
