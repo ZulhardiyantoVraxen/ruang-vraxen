@@ -57,4 +57,10 @@ export const USAGE_EVENT_TYPES = [
   "usage.recorded",
   "usage.cost_cap.warning", // approaching CostCap.maxCostUsd
   "usage.cost_cap.exceeded",
+  // Self-healing: a model call failed (rate-limit/5xx/timeout) and
+  // OpenRouterClient.chatWithFallback() automatically retried on another
+  // model in the chain and succeeded. Lets CTO/Kael (or any future
+  // monitoring UI) see rate-limit pressure platform-wide instead of it only
+  // ever surfacing as a "model sedang sibuk" message to one Director chat.
+  "usage.model_fallback.triggered",
 ] as const;

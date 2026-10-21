@@ -93,7 +93,10 @@ export default function ChiefOfStaffPanel({ pusat }: { pusat: Division | null })
   }, []);
 
   const chiefOfStaff = useMemo(() => {
-    const role = pusat?.agentRoles.find((r) => r.name.toLowerCase().includes("chief of staff"));
+    // Role was renamed "Chief of Staff" -> "Sekretaris Direksi" (that title
+    // now belongs to the Hermes Telegram bot in the org design); same agent,
+    // same in-office job, matched by its new name.
+    const role = pusat?.agentRoles.find((r) => r.name.toLowerCase().includes("sekretaris direksi"));
     return role?.agents[0] ?? null;
   }, [pusat]);
 

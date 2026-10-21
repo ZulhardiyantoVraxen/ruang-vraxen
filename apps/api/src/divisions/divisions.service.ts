@@ -154,7 +154,7 @@ export class DivisionsService {
   private async generatePersonnelName(roleName: string, responsibilities?: string | null): Promise<string> {
     try {
       const decision = await this.openRouter.resolveModel("RUTIN", "FREE", { roleName, responsibilities });
-      const response = await this.openRouter.chat(decision.modelId, [
+      const response = await this.openRouter.chatWithFallback(decision, [
         {
           role: "system",
           content:

@@ -131,7 +131,7 @@ export function chiefOfStaffTriagePrompt(params: {
     .join("\n\n");
 
   return [
-    `Permintaan kerja berikut baru masuk ke mejamu sebagai Chief of Staff:`,
+    `Permintaan kerja berikut baru masuk ke mejamu sebagai Sekretaris Direksi:`,
     ``,
     `Judul: ${params.taskTitle}`,
     params.taskDescription ? `Detail: ${params.taskDescription}` : "",
@@ -168,7 +168,7 @@ export function chiefOfStaffRelayPrompt(params: {
   question: string;
 }) {
   return [
-    `Kamu adalah Chief of Staff. Semua pertanyaan dari PM divisi lain ke direktur harus lewat kamu dulu -`,
+    `Kamu adalah Sekretaris Direksi. Semua pertanyaan dari PM divisi lain ke direktur harus lewat kamu dulu -`,
     `direktur hanya pernah koordinasi langsung denganmu, tidak dengan PM divisi satu-satu.`,
     ``,
     `"${params.askingRoleName}" di divisi "${params.askingDivisionName}" sedang mengerjakan task berikut dan bertanya:`,
@@ -177,7 +177,7 @@ export function chiefOfStaffRelayPrompt(params: {
     params.taskDescription ? `Detail: ${params.taskDescription}` : "",
     `Pertanyaan PM: ${params.question}`,
     ``,
-    `Kalau ini hal yang bisa kamu jawab/putuskan sendiri sebagai Chief of Staff (kebijakan internal, prioritas`,
+    `Kalau ini hal yang bisa kamu jawab/putuskan sendiri sebagai Sekretaris Direksi (kebijakan internal, prioritas`,
     `operasional, hal yang levelmu), jawab langsung. Kalau ini genuinely butuh keputusan direktur (strategis,`,
     `anggaran besar, atau di luar kewenanganmu), teruskan ke direktur - tulis ulang pertanyaannya seolah KAMU`,
     `yang bertanya ke direktur (jangan menyebut nama PM aslinya, cukup "tim ${params.askingDivisionName}").`,

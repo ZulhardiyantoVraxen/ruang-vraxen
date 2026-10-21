@@ -5,6 +5,7 @@ import {
   OpenRouterClient,
   ObjectStorageClient,
   resolveModel,
+  resolveVariantUsed,
   markdownToPdfBuffer,
   GitHubClient,
   GoogleSheetsClient,
@@ -76,7 +77,7 @@ async function runStandardExecutor(
     taskDescription: task.description,
   });
 
-  const { content, tokensIn, tokensOut } = await openRouter.chat(route.modelId, [
+  const { content, tokensIn, tokensOut, modelId: usedModelId } = await openRouter.chatWithFallback(route.modelId, route.fallbackModelIds, [
     { role: "system", content: agent.systemPrompt ?? "Kerjakan task yang diberikan sebaik mungkin." },
     { role: "user", content: prompt },
   ]);
@@ -84,8 +85,8 @@ async function runStandardExecutor(
   await apiClient.recordUsage({
     agentId: agent.id,
     taskId: task.id,
-    modelUsed: route.modelId,
-    modelVariant: route.variant,
+    modelUsed: usedModelId,
+    modelVariant: resolveVariantUsed(route, usedModelId),
     source: "kanban",
     tokensIn,
     tokensOut,
@@ -132,7 +133,7 @@ async function runFinanceExecutor(
     projectName: project?.name ?? null,
   });
 
-  const { content, tokensIn, tokensOut } = await openRouter.chat(route.modelId, [
+  const { content, tokensIn, tokensOut, modelId: usedModelId } = await openRouter.chatWithFallback(route.modelId, route.fallbackModelIds, [
     { role: "system", content: agent.systemPrompt ?? "Kamu adalah Finance, hitung estimasi budget project dengan teliti." },
     { role: "user", content: prompt },
   ]);
@@ -140,8 +141,8 @@ async function runFinanceExecutor(
   await apiClient.recordUsage({
     agentId: agent.id,
     taskId: task.id,
-    modelUsed: route.modelId,
-    modelVariant: route.variant,
+    modelUsed: usedModelId,
+    modelVariant: resolveVariantUsed(route, usedModelId),
     source: "kanban",
     tokensIn,
     tokensOut,
@@ -296,7 +297,7 @@ async function runPmExecutor(
     project: projectContext,
   });
 
-  const { content, tokensIn, tokensOut } = await openRouter.chat(route.modelId, [
+  const { content, tokensIn, tokensOut, modelId: usedModelId } = await openRouter.chatWithFallback(route.modelId, route.fallbackModelIds, [
     { role: "system", content: agent.systemPrompt ?? "Kerjakan task yang diberikan sebaik mungkin, sebagai PM divisi." },
     { role: "user", content: prompt },
   ]);
@@ -304,8 +305,8 @@ async function runPmExecutor(
   await apiClient.recordUsage({
     agentId: agent.id,
     taskId: task.id,
-    modelUsed: route.modelId,
-    modelVariant: route.variant,
+    modelUsed: usedModelId,
+    modelVariant: resolveVariantUsed(route, usedModelId),
     source: "kanban",
     tokensIn,
     tokensOut,
@@ -386,15 +387,16 @@ async function runPmExecutor(
       project: projectContext,
     });
 
-    const followUp = await openRouter.chat(route.modelId, [
+    const followUp = await openRouter.chatWithFallback(route.modelId, route.fallbackModelIds, [
       { role: "system", content: agent.systemPrompt ?? "Kerjakan task yang diberikan sebaik mungkin, sebagai PM divisi." },
       { role: "user", content: followUpPrompt },
     ]);
+    const usedModelId = followUp.modelId;
     await apiClient.recordUsage({
       agentId: agent.id,
       taskId: task.id,
-      modelUsed: route.modelId,
-      modelVariant: route.variant,
+      modelUsed: usedModelId,
+      modelVariant: resolveVariantUsed(route, usedModelId),
       source: "kanban",
       tokensIn: followUp.tokensIn,
       tokensOut: followUp.tokensOut,
@@ -561,7 +563,10 @@ async function getConfiguredRepo(projectId: string): Promise<{ owner: string; re
 }
 
 function isChiefOfStaff(roleName: string, divisionSlug: string): boolean {
-  return divisionSlug === "pusat" && roleName.toLowerCase().includes("chief of staff");
+  // Role was renamed "Chief of Staff" -> "Sekretaris Direksi" (Hermes/
+  // Telegram now holds the "Chief of Staff" title); same in-office routing
+  // job, matched by its new name.
+  return divisionSlug === "pusat" && roleName.toLowerCase().includes("sekretaris direksi");
 }
 
 type RelayResult =
@@ -618,7 +623,7 @@ async function relayQuestionThroughChiefOfStaff(
     question,
   });
 
-  const { content, tokensIn, tokensOut } = await openRouter.chat(route.modelId, [
+  const { content, tokensIn, tokensOut, modelId: usedModelId } = await openRouter.chatWithFallback(route.modelId, route.fallbackModelIds, [
     {
       role: "system",
       content: chief.systemPrompt ?? "Kamu adalah Chief of Staff yang menyaring pertanyaan PM sebelum sampai ke direktur.",
@@ -628,8 +633,8 @@ async function relayQuestionThroughChiefOfStaff(
   await apiClient.recordUsage({
     agentId: chief.id,
     taskId: task.id,
-    modelUsed: route.modelId,
-    modelVariant: route.variant,
+    modelUsed: usedModelId,
+    modelVariant: resolveVariantUsed(route, usedModelId),
     source: "pm-relay",
     tokensIn,
     tokensOut,
@@ -690,7 +695,7 @@ async function runQaIfReviewerAssigned(taskId: string, executorOutput: string) {
     executorOutput,
   });
 
-  const { content, tokensIn, tokensOut } = await openRouter.chat(route.modelId, [
+  const { content, tokensIn, tokensOut, modelId: usedModelId } = await openRouter.chatWithFallback(route.modelId, route.fallbackModelIds, [
     { role: "system", content: "Kamu adalah QA yang teliti dan ringkas." },
     { role: "user", content: prompt },
   ]);
@@ -698,8 +703,8 @@ async function runQaIfReviewerAssigned(taskId: string, executorOutput: string) {
   await apiClient.recordUsage({
     agentId: reviewer.id,
     taskId,
-    modelUsed: route.modelId,
-    modelVariant: route.variant,
+    modelUsed: usedModelId,
+    modelVariant: resolveVariantUsed(route, usedModelId),
     source: "kanban",
     tokensIn,
     tokensOut,

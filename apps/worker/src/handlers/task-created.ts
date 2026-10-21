@@ -1,7 +1,7 @@
 import { prisma } from "../prisma";
 import { apiClient } from "../api-client";
 import { config } from "../config";
-import { OpenRouterClient, resolveModel } from "@platform/shared";
+import { OpenRouterClient, resolveModel, resolveVariantUsed } from "@platform/shared";
 import { chiefOfStaffTriagePrompt } from "../prompts";
 
 const openRouter = new OpenRouterClient(config.openRouterApiKey);
@@ -91,16 +91,19 @@ export async function handleTaskCreated(taskId: string, payload: TaskCreatedPayl
       })),
     });
 
-    const { content, tokensIn, tokensOut } = await openRouter.chat(route.modelId, [
-      { role: "system", content: "Kamu adalah Chief of Staff yang mentriase permintaan kerja masuk ke perusahaan virtual." },
+    // chatWithFallback = self-healing: a rate-limit/timeout/5xx on
+    // route.modelId is retried automatically across route.fallbackModelIds
+    // before this throws into the catch below.
+    const { content, tokensIn, tokensOut, modelId: usedModelId } = await openRouter.chatWithFallback(route.modelId, route.fallbackModelIds, [
+      { role: "system", content: "Kamu adalah Sekretaris Direksi yang mentriase permintaan kerja masuk ke perusahaan virtual." },
       { role: "user", content: prompt },
     ]);
 
     await apiClient.recordUsage({
       agentId: chief.id,
       taskId,
-      modelUsed: route.modelId,
-      modelVariant: route.variant,
+      modelUsed: usedModelId,
+      modelVariant: resolveVariantUsed(route, usedModelId),
       source: "kanban",
       tokensIn,
       tokensOut,

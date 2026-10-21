@@ -88,7 +88,7 @@ Jangan pernah mencampur teks biasa dengan JSON dalam satu balasan.`;
       responsibilities: agent.agentRole.responsibilities,
     });
 
-    let content: string, tokensIn: number, tokensOut: number;
+    let content: string, tokensIn: number, tokensOut: number, modelUsed: string, variantUsed: "FREE" | "PAID";
     try {
       const messagesForModel = history.map((m: { role: string; content: string }, i: number) => ({
         role: (m.role === "DIRECTOR" ? "user" : "assistant") as "user" | "assistant",
@@ -97,20 +97,28 @@ Jangan pernah mencampur teks biasa dengan JSON dalam satu balasan.`;
         // itself keeps the short reference line, see storedMessage above).
         content: extrasForModel && i === history.length - 1 ? `${message}\n\n${extrasForModel}` : m.content,
       }));
-      const result = await this.modelRouting.chat(route.modelId, [
-        { role: "system", content: systemPrompt },
-        ...messagesForModel,
-      ]);
+      // chatWithFallback = self-healing: a rate-limit/timeout/5xx on
+      // route.modelId is retried automatically across route.fallbackModelIds
+      // before this ever reaches the catch block below - the Director only
+      // sees "agent sedang sibuk" if EVERY model in the chain failed.
+      const result = await this.modelRouting.chatWithFallback(
+        route,
+        [{ role: "system", content: systemPrompt }, ...messagesForModel],
+        { aggregateId: agent.id, source: "chat" },
+      );
       content = result.content;
       tokensIn = result.tokensIn;
       tokensOut = result.tokensOut;
+      modelUsed = result.modelId;
+      variantUsed = result.variantUsed;
     } catch (err) {
       // A provider hiccup (rate limit, timeout, model down) must read as the
       // agent being briefly unreachable, not as a broken chat feature - the
       // director's own message is already saved above, so this only affects
       // the reply. Previously this threw straight through to a raw HTTP 500
-      // in the UI ("API .../chat failed: 500").
-      this.logger.error(`OpenRouter call gagal untuk agent ${agentId} (model ${route.modelId}): ${err instanceof Error ? err.message : err}`);
+      // in the UI ("API .../chat failed: 500"). By this point every model in
+      // the fallback chain has already been tried (see chatWithFallback).
+      this.logger.error(`OpenRouter call gagal untuk agent ${agentId} (model ${route.modelId}, termasuk seluruh fallback chain): ${err instanceof Error ? err.message : err}`);
       const friendly =
         "Maaf, model AI saya sedang sibuk atau kena limit sesaat (kemungkinan karena trafik tinggi barusan). Coba kirim lagi dalam beberapa menit.";
       await this.prisma.chatMessage.create({ data: { agentId, role: "AGENT", content: friendly } });
@@ -120,8 +128,8 @@ Jangan pernah mencampur teks biasa dengan JSON dalam satu balasan.`;
     await this.usage
       .record({
         agentId: agent.id,
-        modelUsed: route.modelId,
-        modelVariant: route.variant,
+        modelUsed, // actual model that answered - may differ from route.modelId if a fallback fired
+        modelVariant: variantUsed,
         source: "chat",
         tokensIn,
         tokensOut,

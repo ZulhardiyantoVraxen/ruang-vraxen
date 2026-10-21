@@ -8,7 +8,7 @@
  * treat `openRouterModelFree` as a starting point to verify against
  * https://openrouter.ai/models?max_price=0 before going live.
  */
-import { PrismaClient, ModelTier, DivisionStatus, AgentStatus } from "@prisma/client";
+import { PrismaClient, ModelTier, DivisionStatus, AgentStatus, ModelVariant } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
@@ -106,16 +106,41 @@ async function seedDefaultOrg() {
   const tiers = await prisma.modelClass.findMany();
   const modelClassId = (tier: ModelTier) => tiers.find((t) => t.tier === tier)!.id;
 
-  type RoleSeed = { name: string; tier: ModelTier; responsibilities: string; requiresApproval?: boolean; agent: string };
+  // modelVariant is optional and defaults to Agent's schema default (FREE).
+  // Only set for roles that must never silently run on a free model - e.g.
+  // Staff Direksi below, which the Direktur explicitly wants "berbayar
+  // secara full" (fully paid), not switchable like the division roster.
+  type RoleSeed = { name: string; tier: ModelTier; responsibilities: string; requiresApproval?: boolean; agent: string; modelVariant?: ModelVariant };
   type DivisionSeed = { slug: string; name: string; description: string; metadata?: Record<string, unknown>; roles: RoleSeed[] };
 
   const divisions: DivisionSeed[] = [
+    // Staff Direksi: the C-suite layer the Direktur asked for - CEO is the
+    // single point of contact to the Direktur (meets Hermes/Chief of Staff
+    // instead of the Direktur fielding every question directly), CFO/CTO/COO
+    // report to the CEO. All four are ATAS tier and PAID-only by design, per
+    // "menggunakan versi berbayar secara full" from the org-design chat.
+    {
+      slug: "staff-direksi",
+      name: "Staff Direksi",
+      description: "C-suite di bawah Direktur Utama langsung - CEO jadi satu-satunya titik kontak ke Direktur; CFO/CTO/COO lapor ke CEO, bukan ke Direktur.",
+      roles: [
+        { name: "CEO", tier: ModelTier.ATAS, responsibilities: "Titik kontak tunggal ke Direktur; triase zero-level support; menerima meeting dari Chief of Staff (Hermes); eskalasi ke Direktur hanya kalau Staff Direksi sendiri buntu", requiresApproval: true, agent: "Edward", modelVariant: "PAID" },
+        { name: "CFO", tier: ModelTier.ATAS, responsibilities: "Pantau biaya token/OpenRouter semua agent, laporan budget, rekomendasi efisiensi model", agent: "Nara", modelVariant: "PAID" },
+        { name: "CTO", tier: ModelTier.ATAS, responsibilities: "Kesehatan infra, rate-limit semua agent (self-healing), arsitektur teknis, supervisi admin/arsitek AI lokal", agent: "Kael", modelVariant: "PAID" },
+        { name: "COO", tier: ModelTier.ATAS, responsibilities: "Riset apa yang harus dikerjakan tiap divisi, pantau tim idle & assign kerja, pipeline produksi sampai ke klien", agent: "Dian", modelVariant: "PAID" },
+      ],
+    },
     {
       slug: "pusat",
       name: "Pusat",
-      description: "Chief of Staff, Finance, dan Auditor - melayani semua divisi, menggabungkan laporan untuk antrean persetujuan Anda.",
+      description: "Sekretaris Direksi, Finance, dan Auditor - melayani semua divisi, menggabungkan laporan untuk antrean persetujuan Staff Direksi.",
       roles: [
-        { name: "Chief of Staff", tier: ModelTier.ATAS, responsibilities: "Menggabungkan laporan 4 PM jadi antrean persetujuan Anda", requiresApproval: true, agent: "Raka Pratama" },
+        // Was "Chief of Staff" - renamed to avoid colliding with the Hermes
+        // Telegram bot, which now holds that title in the org design (Hermes
+        // is the Director's Chief of Staff; this in-office agent just rolls
+        // reports up to the Staff Direksi / CEO instead of straight to the
+        // Director). Same agent, same responsibilities otherwise.
+        { name: "Sekretaris Direksi", tier: ModelTier.ATAS, responsibilities: "Menggabungkan laporan 4 PM jadi antrean persetujuan untuk Staff Direksi (CEO)", requiresApproval: true, agent: "Raka Pratama" },
         { name: "Auditor", tier: ModelTier.ATAS, responsibilities: "Cek acak semua divisi, butuh penalaran kritis", agent: "Dewi Anggraini" },
         { name: "Finance", tier: ModelTier.RUTIN, responsibilities: "Menghitung estimasi budget tiap project per fase pengerjaan, lalu membuat dokumennya sendiri di Google Sheets", agent: "Budi Santoso" },
       ],
@@ -202,7 +227,18 @@ async function seedDefaultOrg() {
       // per role, safe to re-run without creating duplicates on every seed.
       const existing = await prisma.agent.findFirst({ where: { agentRoleId: role.id, displayName: r.agent } });
       if (!existing) {
-        await prisma.agent.create({ data: { agentRoleId: role.id, displayName: r.agent, status: AgentStatus.IDLE } });
+        await prisma.agent.create({
+          data: {
+            agentRoleId: role.id,
+            displayName: r.agent,
+            status: AgentStatus.IDLE,
+            ...(r.modelVariant ? { modelVariant: r.modelVariant as ModelVariant } : {}),
+          },
+        });
+      } else if (r.modelVariant && existing.modelVariant !== r.modelVariant) {
+        // Re-running the seed must not silently leave a Staff Direksi agent
+        // on FREE if it was ever switched - keep enforcing "berbayar penuh".
+        await prisma.agent.update({ where: { id: existing.id }, data: { modelVariant: r.modelVariant as ModelVariant } });
       }
     }
   }

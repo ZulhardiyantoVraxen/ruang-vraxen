@@ -500,7 +500,9 @@ export class TasksService {
       where: { slug: "pusat" },
       include: { agentRoles: { include: { agents: true } } },
     });
-    const chiefRole = pusat?.agentRoles.find((r) => r.name.toLowerCase().includes("chief of staff"));
+    // Role was renamed "Chief of Staff" -> "Sekretaris Direksi" (Hermes/
+    // Telegram now holds the "Chief of Staff" title); matched by new name.
+    const chiefRole = pusat?.agentRoles.find((r) => r.name.toLowerCase().includes("sekretaris direksi"));
     const chief = chiefRole?.agents[0] ?? null;
 
     const divisions = await this.prisma.division.findMany({

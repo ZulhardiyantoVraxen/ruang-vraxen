@@ -85,10 +85,14 @@ export class OrchestratorService {
       .map((qa) => `Q: ${qa.question ?? "(brief awal)"}\nA: ${qa.answer ?? "(belum dijawab)"}`)
       .join("\n\n");
 
-    const { content, tokensIn, tokensOut } = await this.openRouter.chat(route.modelId, [
-      { role: "system", content: ORCHESTRATOR_SYSTEM_PROMPT },
-      { role: "user", content: transcript },
-    ]);
+    const { content, tokensIn, tokensOut } = await this.openRouter.chatWithFallback(
+      route,
+      [
+        { role: "system", content: ORCHESTRATOR_SYSTEM_PROMPT },
+        { role: "user", content: transcript },
+      ],
+      { aggregateId: sessionId, source: "onboarding" },
+    );
 
     const parsed = JSON.parse(content) as OrchestratorReply;
 
