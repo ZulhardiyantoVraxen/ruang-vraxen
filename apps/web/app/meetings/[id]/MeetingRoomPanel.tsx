@@ -33,6 +33,13 @@ function formatTime(iso: string) {
   }
 }
 
+/** Dedupe by id (a poll result and the final send() result can overlap) and keep transcript order. */
+function mergeMessages(existing: Message[], incoming: Message[]): Message[] {
+  const byId = new Map(existing.map((m) => [m.id, m]));
+  for (const m of incoming) byId.set(m.id, m);
+  return Array.from(byId.values()).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+}
+
 /**
  * One message from the Director triggers EVERY participant to reply in
  * turn - so a single send can take a while (one model call per participant,
@@ -79,20 +86,48 @@ export default function MeetingRoomPanel({ initialRoom }: { initialRoom: Room })
 
   const isActive = room.status === "ACTIVE";
 
+  // While a send is in flight, show who's still thinking - shrinks live as
+  // polling (see send() below) brings in each agent's reply one by one.
+  const lastDirectorIdx = room.messages.map((m) => m.senderType).lastIndexOf("DIRECTOR");
+  const repliedAgentIds = new Set(
+    room.messages.slice(lastDirectorIdx + 1).map((m) => m.senderAgent?.id).filter((id): id is string => Boolean(id)),
+  );
+  const pendingParticipants = sending ? room.participants.filter((p) => !repliedAgentIds.has(p.agent.id)) : [];
+
   async function send() {
     const content = draft.trim();
     if (!content || sending) return;
     setSending(true);
     setDraft("");
+    setFailures([]);
     const attachmentIds = attachments.map((a) => a.id);
     setAttachments([]);
+
+    // "Tidak realtime, harus refresh dulu baru keluar balasan" - one message
+    // makes EVERY participant reply in turn (one model call each,
+    // sequentially), so the POST below can take a while to fully resolve.
+    // Each reply is persisted to the DB as soon as that agent finishes, not
+    // only once the whole round is done - so poll the room's own messages
+    // while we wait and merge in whatever has already landed, instead of
+    // leaving the transcript looking frozen until the single big response
+    // finally comes back.
+    const pollId = setInterval(async () => {
+      try {
+        const fresh = await api.getMeeting(room.id);
+        setRoom((prev) => ({ ...prev, messages: mergeMessages(prev.messages, fresh.messages) }));
+      } catch {
+        // transient - next tick (or the final await below) will catch up
+      }
+    }, 1500);
+
     try {
       const result = await api.sendMeetingMessage(room.id, content, attachmentIds);
-      setRoom((prev) => ({ ...prev, messages: [...prev.messages, ...result.messages] }));
+      setRoom((prev) => ({ ...prev, messages: mergeMessages(prev.messages, result.messages) }));
       setFailures(result.failures);
     } catch {
       setDraft(content); // let the Director just retry
     } finally {
+      clearInterval(pollId);
       setSending(false);
     }
   }
@@ -153,6 +188,9 @@ export default function MeetingRoomPanel({ initialRoom }: { initialRoom: Room })
             <ReleaseAttachmentActions content={m.content} />
           </div>
         ))}
+        {pendingParticipants.length > 0 && (
+          <p className={styles.participants}>⏳ Menunggu balasan: {pendingParticipants.map((p) => p.agent.displayName).join(", ")}</p>
+        )}
         {failures.map((f) => (
           <div key={f.agentId} className={styles.failure}>
             {f.agentName} sedang tidak bisa merespons (model sibuk/limit) - coba kirim ulang sebentar lagi.
