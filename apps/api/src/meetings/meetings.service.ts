@@ -97,13 +97,22 @@ export class MeetingsService {
 
     const existing = await this.prisma.meetingRoom.findFirst({ where: { type: "DIRECTOR_CEO", status: "ACTIVE" } });
 
-    const roomId = existing
-      ? existing.id
-      : (
-          await this.prisma.meetingRoom.create({
-            data: { type: "DIRECTOR_CEO" as MeetingRoomType, title: "Rapat Direktur & Staff Direksi" },
-          })
-        ).id;
+    let roomId: string;
+    if (existing) {
+      roomId = existing.id;
+      // Self-heal the title too - a room created before this fix still carries
+      // the old "Direktur & CEO" label even though its participants are now
+      // being topped up to the whole roster below.
+      if (existing.title !== "Rapat Direktur & Staff Direksi") {
+        await this.prisma.meetingRoom.update({ where: { id: roomId }, data: { title: "Rapat Direktur & Staff Direksi" } });
+      }
+    } else {
+      roomId = (
+        await this.prisma.meetingRoom.create({
+          data: { type: "DIRECTOR_CEO" as MeetingRoomType, title: "Rapat Direktur & Staff Direksi" },
+        })
+      ).id;
+    }
 
     for (const agent of staffDireksiAgents) {
       await this.prisma.meetingParticipant.upsert({
