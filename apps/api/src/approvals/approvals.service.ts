@@ -22,6 +22,16 @@ export class ApprovalsService {
     });
   }
 
+  /** Already decided (approved or rejected) - the archive folder for the Approvals page, grouped client-side by division same as `pending()`. */
+  decided() {
+    return this.prisma.approval.findMany({
+      where: { status: { in: ["APPROVED", "REJECTED"] } },
+      include: { task: { include: { division: true, project: true } } },
+      orderBy: { decidedAt: "desc" },
+      take: 200,
+    });
+  }
+
   async decide(approvalId: string, status: "APPROVED" | "REJECTED", approverRef: string, notes?: string) {
     const approval = await this.prisma.approval.update({
       where: { id: approvalId },

@@ -32,6 +32,8 @@ export const api = {
   getDivision: (slug: string) => request<any>(`/divisions/${slug}`),
   runningTasks: (divisionId: string) => request<any[]>(`/tasks/division/${divisionId}/running`),
   pendingApprovals: () => request<any[]>("/approvals/pending"),
+  /** Arsip - approval yang sudah diputuskan (disetujui/ditolak). */
+  decidedApprovals: () => request<any[]>("/approvals/decided"),
   decideApproval: (id: string, status: "APPROVED" | "REJECTED", approverRef: string, notes?: string) =>
     request(`/approvals/${id}/decide`, { method: "PATCH", body: JSON.stringify({ status, approverRef, notes }) }),
   createTask: (payload: {
@@ -125,6 +127,8 @@ export const api = {
     >("/tasks/archive"),
   /** The director's queue of questions raised by PM/decision-point agents mid-task. */
   openQuestions: () => request<any[]>("/questions/open"),
+  /** Arsip - pertanyaan yang sudah dijawab (atau repo-request yang sudah dikonfirmasi). */
+  archivedQuestions: () => request<any[]>("/questions/archived"),
   /** `attachmentId` from `uploadFile` - "setiap pertanyaan juga ada attachment filenya". */
   answerQuestion: (id: string, answer: string, attachmentId?: string) =>
     request<any>(`/questions/${id}/answer`, { method: "PATCH", body: JSON.stringify({ answer, attachmentId }) }),

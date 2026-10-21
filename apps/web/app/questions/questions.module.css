@@ -190,3 +190,46 @@
   text-decoration: none;
   white-space: nowrap;
 }
+
+/* Topic tabs - one toggle per division with an open-count badge, plus a
+   fixed "Semua" and "Arsip" toggle. A division's toggle disappears the
+   moment its open count hits zero - see QuestionsPanel's topics memo. */
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: -4px 0 4px;
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  border-radius: 999px;
+  border: 1px solid #243545;
+  background: #0d1826;
+  color: #93a4b5;
+  font-size: 12.5px;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tabActive {
+  border-color: #5fc9b8;
+  background: rgba(95, 201, 184, 0.12);
+  color: #eef3f7;
+}
+
+.tabCount {
+  font-size: 11px;
+  font-family: var(--font-mono), monospace;
+  color: inherit;
+  opacity: 0.75;
+}
+
+.tabArchive {
+  margin-left: auto;
+}

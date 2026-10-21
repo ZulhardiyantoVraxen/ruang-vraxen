@@ -10,6 +10,11 @@ export class QuestionsController {
     return this.service.open();
   }
 
+  /** Questions already answered (or repo-requests already confirmed) - the archive folder for the Questions page. */
+  @Get("archived") archived() {
+    return this.service.archived();
+  }
+
   /** Called by apps/worker when a PM-tier executor needs the director's input. */
   @Post() ask(@Body() dto: AskDirectorDto) {
     return this.service.ask(dto);

@@ -196,3 +196,66 @@
   opacity: 0.6;
   cursor: default;
 }
+
+/* Topic tabs - same pattern as the Questions page: one toggle per division
+   with a pending-count badge, plus "Semua" and "Arsip". A division's toggle
+   disappears once it has no pending approvals left. */
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  border-radius: 999px;
+  border: 1px solid #243545;
+  background: #0d1826;
+  color: #93a4b5;
+  font-size: 12.5px;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tabActive {
+  border-color: #5fc9b8;
+  background: rgba(95, 201, 184, 0.12);
+  color: #eef3f7;
+}
+
+.tabCount {
+  font-size: 11px;
+  font-family: var(--font-mono), monospace;
+  color: inherit;
+  opacity: 0.75;
+}
+
+.tabArchive {
+  margin-left: auto;
+}
+
+.statusPill {
+  flex: none;
+  font-size: 10.5px;
+  font-family: var(--font-mono), monospace;
+  border-radius: 6px;
+  padding: 2px 7px;
+}
+
+.statusApproved {
+  color: #9fe6d8;
+  background: #0b2a24;
+  border: 1px solid #1d4c42;
+}
+
+.statusRejected {
+  color: #e4998f;
+  background: #2a1414;
+  border: 1px solid #4c1d1d;
+}

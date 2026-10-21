@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import ExpandableText from "../components/ExpandableText";
 import styles from "./questions.module.css";
@@ -9,6 +9,8 @@ type Question = {
   id: string;
   question: string;
   askedAt: string;
+  answeredAt?: string | null;
+  answer?: string | null;
   agent: { displayName: string; agentRole: { name: string } };
   division: { name: string; slug: string };
   task: { id: string; title: string; projectId?: string | null; project?: { name: string } | null } | null;
@@ -57,6 +59,47 @@ export default function QuestionsPanel({ initial }: { initial: Question[] }) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [repoNameDrafts, setRepoNameDrafts] = useState<Record<string, string>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
+
+  // "Dikelompokkan berdasarkan topik" (= divisi) - "all" | "archive" | a
+  // division slug. A division's own toggle only exists while it still has
+  // at least one open question, so this is recomputed from `questions`
+  // every render rather than captured once from `initial`.
+  const [activeTopic, setActiveTopic] = useState<string>("all");
+  const [archived, setArchived] = useState<Question[] | null>(null);
+  const [archiveLoading, setArchiveLoading] = useState(false);
+
+  const topics = useMemo(() => {
+    const map = new Map<string, { slug: string; name: string; count: number }>();
+    for (const q of questions) {
+      const existing = map.get(q.division.slug);
+      if (existing) existing.count += 1;
+      else map.set(q.division.slug, { slug: q.division.slug, name: q.division.name, count: 1 });
+    }
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [questions]);
+
+  // "Sampai pertanyaan itu habis, toggle nomor akan hilang" - once the topic
+  // the director was looking at runs dry, fall back to "Semua" instead of
+  // showing an empty tab that no longer has a toggle to click back from.
+  if (activeTopic !== "all" && activeTopic !== "archive" && !topics.some((t) => t.slug === activeTopic)) {
+    setActiveTopic("all");
+  }
+
+  async function openArchive() {
+    setActiveTopic("archive");
+    if (archived !== null) return;
+    setArchiveLoading(true);
+    try {
+      setArchived(await api.archivedQuestions());
+    } catch {
+      setArchived([]);
+    } finally {
+      setArchiveLoading(false);
+    }
+  }
+
+  const visible =
+    activeTopic === "archive" ? archived ?? [] : activeTopic === "all" ? questions : questions.filter((q) => q.division.slug === activeTopic);
 
   // "Setiap pertanyaan juga ada attachment filenya" - same attach-then-send
   // pattern as the chat/perintah surfaces: picking a file uploads it right
@@ -117,12 +160,72 @@ export default function QuestionsPanel({ initial }: { initial: Question[] }) {
       </div>
       <p className={styles.lead}>
         PM (atau Chief of Staff) berhenti sejenak untuk menanyakan ini sebelum melanjutkan pekerjaannya. Begitu Anda
-        jawab (atau konfirmasi repo sudah dibuat), task yang menunggu langsung dilanjutkan.
+        jawab (atau konfirmasi repo sudah dibuat), task yang menunggu langsung dilanjutkan dan pertanyaannya pindah ke Arsip.
       </p>
 
-      {questions.length === 0 && <p className={styles.empty}>Tidak ada pertanyaan yang menunggu.</p>}
+      <div className={styles.tabs}>
+        <button
+          type="button"
+          className={`${styles.tab} ${activeTopic === "all" ? styles.tabActive : ""}`}
+          onClick={() => setActiveTopic("all")}
+        >
+          Semua <span className={styles.tabCount}>{questions.length}</span>
+        </button>
+        {topics.map((t) => (
+          <button
+            key={t.slug}
+            type="button"
+            className={`${styles.tab} ${activeTopic === t.slug ? styles.tabActive : ""}`}
+            onClick={() => setActiveTopic(t.slug)}
+          >
+            {t.name} <span className={styles.tabCount}>{t.count}</span>
+          </button>
+        ))}
+        <button
+          type="button"
+          className={`${styles.tab} ${styles.tabArchive} ${activeTopic === "archive" ? styles.tabActive : ""}`}
+          onClick={openArchive}
+        >
+          🗂 Arsip
+        </button>
+      </div>
 
-      {questions.map((q) => {
+      {activeTopic === "archive" && archiveLoading && <p className={styles.empty}>Memuat arsip…</p>}
+      {activeTopic === "archive" && !archiveLoading && visible.length === 0 && (
+        <p className={styles.empty}>Belum ada pertanyaan di arsip.</p>
+      )}
+      {activeTopic !== "archive" && visible.length === 0 && (
+        <p className={styles.empty}>
+          {questions.length === 0 ? "Tidak ada pertanyaan yang menunggu." : "Tidak ada pertanyaan menunggu untuk topik ini."}
+        </p>
+      )}
+
+      {visible.map((q) => {
+        if (activeTopic === "archive") {
+          return (
+            <div key={q.id} className={styles.card}>
+              <div className={styles.cardMeta}>
+                <span className={styles.fromBadge}>{q.agent.agentRole.name}</span>
+                <span className={styles.metaText}>
+                  {q.agent.displayName} · {q.division.name} · {formatTime(q.answeredAt ?? q.askedAt)}
+                </span>
+                {q.task && <span className={styles.taskLink}>Task: {q.task.title}</span>}
+              </div>
+              <ExpandableText text={parseRepoRequest(q.question) ? "📦 Permintaan repository" : q.question} className={styles.question} />
+              {q.answer && (
+                <p className={styles.metaText} style={{ color: "#5fc9b8" }}>
+                  ✅ {q.answer}
+                </p>
+              )}
+            </div>
+          );
+        }
+        return renderOpenCard(q);
+      })}
+    </div>
+  );
+
+  function renderOpenCard(q: Question) {
         const repoRequest = parseRepoRequest(q.question);
         return (
           <div key={q.id} className={styles.card}>
@@ -215,7 +318,5 @@ export default function QuestionsPanel({ initial }: { initial: Question[] }) {
             )}
           </div>
         );
-      })}
-    </div>
-  );
+  }
 }

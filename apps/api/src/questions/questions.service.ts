@@ -41,6 +41,25 @@ export class QuestionsService {
     });
   }
 
+  /**
+   * "Jika sudah dijawab ... akan pindah ke folder archive" - once a question
+   * is answered (free-text or a repo-request confirm), it leaves `open()`
+   * and lands here instead, grouped client-side by the same `division` the
+   * open queue already groups by.
+   */
+  archived() {
+    return this.prisma.directorQuestion.findMany({
+      where: { status: "ANSWERED" },
+      include: {
+        agent: { select: { displayName: true, agentRole: { select: { name: true } } } },
+        division: { select: { name: true, slug: true } },
+        task: { select: { id: true, title: true, projectId: true, project: { select: { name: true } } } },
+      },
+      orderBy: { answeredAt: "desc" },
+      take: 200,
+    });
+  }
+
   /** Worker calls this when a PM-tier executor's structured reply is {type:"question",...}. */
   async ask(dto: AskDirectorDto) {
     const question = await this.prisma.directorQuestion.create({ data: dto });
