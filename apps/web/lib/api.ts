@@ -162,4 +162,12 @@ export const api = {
   inviteToMeeting: (id: string, agentId: string) =>
     request<any>(`/meetings/${id}/invite`, { method: "POST", body: JSON.stringify({ agentId }) }),
   closeMeeting: (id: string) => request<any>(`/meetings/${id}/close`, { method: "POST" }),
+  /** "Dirangkum dulu dari hasil rapat" - draft title+description, nothing created yet. */
+  summarizeMeeting: (id: string) => request<{ title: string; description: string }>(`/meetings/${id}/summarize`, { method: "POST" }),
+  /** "Lalu dijadikan task" - Director-approved summary becomes a real Task. */
+  createTaskFromMeeting: (id: string, agentId: string, title: string, description: string) =>
+    request<{ taskId: string; queued: boolean }>(`/meetings/${id}/create-task`, {
+      method: "POST",
+      body: JSON.stringify({ agentId, title, description }),
+    }),
 };

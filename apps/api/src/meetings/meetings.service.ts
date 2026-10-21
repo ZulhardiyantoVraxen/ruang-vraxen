@@ -32,13 +32,20 @@ const TRANSCRIPT_WINDOW = 40; // enough roundtable turns for context without bal
  *
  * "Task akan masuk dari hasil meeting dengan Staff Direksi" - the PIC Chief
  * of Staff page (a standalone "give work directly" form) was retired once
- * this existed, so a meeting has to be able to actually produce a real Task
- * on its own, not just a chat transcript. Each participant's reply is
- * classified the same way ChatService classifies a 1:1 chat reply: a work
- * order clearly directed at that participant becomes a real Task (via
- * TasksService.createDirectCommand, landing in THAT agent's own division)
- * instead of a plain message, with a short system note taking its place in
- * the transcript so the meeting stays coherent.
+ * this existed, so a meeting has to be able to produce a real Task. A first
+ * attempt classified each reply automatically (same prompt-based
+ * classify-or-reply pattern as ChatService), but testing showed it's not
+ * reliable - even an explicit "TUGAS BARU untuk X:" prefix got a
+ * conversational reply instead of the required JSON, silently producing no
+ * Task at all. Replaced with a manual, Director-driven flow instead:
+ * `summarize()` asks the model for a plain summary (title + description) of
+ * the transcript so far - a well-defined single-purpose extraction, which
+ * models handle far more reliably than the earlier classify-or-reply
+ * decision, and even an imperfect result is harmless here because the
+ * Director reviews/edits it before anything is created - then
+ * `createTaskFromSummary()` turns the (Director-approved) title/description
+ * into a real Task via TasksService.createDirectCommand once the Director
+ * explicitly asks for it.
  */
 @Injectable()
 export class MeetingsService {
@@ -181,13 +188,7 @@ Berikut transkrip rapat sejauh ini (urut dari lama ke baru):
 
 ${transcriptText}
 
-Berikan tanggapanmu sebagai ${agent.displayName} terhadap perkembangan terbaru di atas - singkat, relevan dengan peranmu, dan dalam Bahasa Indonesia. Kalau tidak ada yang perlu kamu tambahkan dari sisi perananmu, cukup bilang itu secara singkat (jangan mengulang pendapat yang sudah disampaikan orang lain).
-
-ATURAN PALING PENTING: lihat pesan TERAKHIR dari Direktur saja untuk memutuskan ini.
-- Kalau pesan itu OBROLAN/DISKUSI/KOORDINASI BIASA (update status, pertanyaan, pendapat) -> balas sebagai teks natural seperti di atas. JANGAN pernah balas JSON untuk kasus ini.
-- Kalau pesan itu benar-benar PERINTAH KERJA/TUGAS BARU yang jelas ditujukan untukmu secara spesifik (disebut namamu, atau jelas satu-satunya yang relevan dari perananmu) -> balas HANYA dengan JSON murni tanpa markdown fence, persis format ini: {"type":"task","title":"judul singkat tugas","description":"detail lengkap tugasnya"}
-
-Jangan pernah mencampur teks biasa dengan JSON dalam satu balasan.`;
+Berikan tanggapanmu sebagai ${agent.displayName} terhadap perkembangan terbaru di atas - singkat, relevan dengan peranmu, dan dalam Bahasa Indonesia. Kalau tidak ada yang perlu kamu tambahkan dari sisi perananmu, cukup bilang itu secara singkat (jangan mengulang pendapat yang sudah disampaikan orang lain). Balas sebagai teks natural biasa - jangan pernah balas dalam format JSON.`;
 
       try {
         const route = await this.modelRouting.resolveModel(agent.agentRole.tier, agent.modelVariant, {
@@ -203,32 +204,8 @@ Jangan pernah mencampur teks biasa dengan JSON dalam satu balasan.`;
           { aggregateId: roomId, source: "meeting" },
         );
 
-        const unfenced = result.content.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
-        let taskDraft: { title: string; description: string } | null = null;
-        try {
-          const parsed = JSON.parse(unfenced);
-          if (parsed?.type === "task" && typeof parsed.title === "string") {
-            taskDraft = { title: parsed.title, description: typeof parsed.description === "string" ? parsed.description : parsed.title };
-          }
-        } catch {
-          // Not JSON - treat as a normal meeting reply below.
-        }
-
-        let replyContent = result.content;
-        if (taskDraft) {
-          try {
-            const taskResult = await this.tasks.createDirectCommand(agent.id, taskDraft.title, taskDraft.description);
-            replyContent = taskResult.queued
-              ? `📋 Dicatat sebagai tugas: "${taskDraft.title}" — saya sedang mengerjakan hal lain, akan saya kerjakan begitu selesai.`
-              : `📋 Dicatat sebagai tugas: "${taskDraft.title}" — langsung saya kerjakan, bisa dipantau di Task Board.`;
-          } catch (taskErr) {
-            this.logger.error(`Meeting ${roomId}: gagal membuat task dari balasan ${agent.displayName}: ${taskErr instanceof Error ? taskErr.message : taskErr}`);
-            replyContent = `Maaf, saya mengerti ini sebagai tugas ("${taskDraft.title}") tapi gagal mencatatnya barusan.`;
-          }
-        }
-
         const reply = await this.prisma.meetingMessage.create({
-          data: { meetingRoomId: roomId, senderType: "AGENT", senderAgentId: agent.id, content: replyContent },
+          data: { meetingRoomId: roomId, senderType: "AGENT", senderAgentId: agent.id, content: result.content },
           include: { senderAgent: true },
         });
         created.push(reply);
@@ -252,5 +229,77 @@ Jangan pernah mencampur teks biasa dengan JSON dalam satu balasan.`;
 
     await this.prisma.meetingRoom.update({ where: { id: roomId }, data: { updatedAt: new Date() } });
     return { messages: created, failures };
+  }
+
+  /**
+   * "Dirangkum dulu dari hasil rapat, lalu dijadikan task" - one plain
+   * summarization call over the whole transcript, always the same shape
+   * (never a classify-or-reply branch), so it's far more reliable than the
+   * earlier auto-classification attempt. Returns a draft only; nothing is
+   * created yet - the Director reviews/edits this before calling
+   * createTaskFromSummary.
+   */
+  async summarize(roomId: string) {
+    const room = await this.prisma.meetingRoom.findUnique({
+      where: { id: roomId },
+      include: { messages: { orderBy: { createdAt: "asc" }, include: { senderAgent: true } } },
+    });
+    if (!room) throw new NotFoundException(`Meeting room ${roomId} tidak ditemukan`);
+    if (room.messages.length === 0) throw new BadRequestException("Belum ada percakapan di rapat ini untuk dirangkum");
+
+    const transcriptText = room.messages
+      .map((m) => `${m.senderType === "DIRECTOR" ? "Direktur" : m.senderAgent?.displayName ?? "Agent"}: ${m.content}`)
+      .join("\n");
+
+    const summarizerPrompt = `Berikut transkrip rapat berjudul "${room.title}":
+
+${transcriptText}
+
+Ringkas hasil rapat ini menjadi draft satu pekerjaan (task) yang bisa ditugaskan. Balas HANYA dengan JSON murni tanpa markdown fence, persis format ini: {"title":"judul singkat (maks 10 kata)","description":"ringkasan hasil diskusi, keputusan, dan apa yang perlu dikerjakan - dalam Bahasa Indonesia"}`;
+
+    // Plain tier call (no specific agent persona needed for a summary) -
+    // ATAS tier, same as other director-facing judgment calls, PAID so a
+    // free-pool model's quirks never degrade something the Director is
+    // about to act on.
+    const route = await this.modelRouting.resolveModel("ATAS", "PAID");
+    const result = await this.modelRouting.chatWithFallback(
+      route,
+      [
+        { role: "system", content: "Kamu merangkum rapat kerja menjadi draft task yang jelas dan actionable." },
+        { role: "user", content: summarizerPrompt },
+      ],
+      { aggregateId: roomId, source: "meeting-summary" },
+    );
+
+    const unfenced = result.content.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+    try {
+      const parsed = JSON.parse(unfenced);
+      if (typeof parsed?.title === "string") {
+        return { title: parsed.title, description: typeof parsed.description === "string" ? parsed.description : result.content };
+      }
+    } catch {
+      // Model didn't return clean JSON - fall through to the raw-text fallback below.
+    }
+    // Harmless fallback: the Director edits this in the UI before creating
+    // anything anyway, so an imperfect parse never blocks the flow.
+    return { title: room.title, description: result.content };
+  }
+
+  /** Director-approved: turns a (possibly edited) summary into a real Task, assigned to the chosen participant. */
+  async createTaskFromSummary(roomId: string, agentId: string, title: string, description: string) {
+    const participant = await this.prisma.meetingParticipant.findUnique({
+      where: { meetingRoomId_agentId: { meetingRoomId: roomId, agentId } },
+    });
+    if (!participant) throw new BadRequestException("Agent tersebut bukan peserta rapat ini");
+
+    const result = await this.tasks.createDirectCommand(agentId, title, description);
+    await this.prisma.meetingMessage.create({
+      data: {
+        meetingRoomId: roomId,
+        senderType: "DIRECTOR",
+        content: `📋 Dijadikan tugas: "${title}" (Task #${result.taskId.slice(-6)})`,
+      },
+    });
+    return result;
   }
 }

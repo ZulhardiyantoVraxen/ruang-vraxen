@@ -44,6 +44,14 @@ export default function MeetingRoomPanel({ initialRoom }: { initialRoom: Room })
   const [sending, setSending] = useState(false);
   const [failures, setFailures] = useState<{ agentId: string; agentName: string; reason: string }[]>([]);
 
+  // "Dirangkum dulu dari hasil rapat, lalu dijadikan task" - a draft the
+  // Director reviews/edits before anything is actually created; nothing
+  // here touches the Task Board until "Buat Task" is pressed.
+  const [summarizing, setSummarizing] = useState(false);
+  const [taskDraft, setTaskDraft] = useState<{ title: string; description: string; agentId: string } | null>(null);
+  const [creatingTask, setCreatingTask] = useState(false);
+  const [taskCreated, setTaskCreated] = useState<string | null>(null);
+
   const isActive = room.status === "ACTIVE";
 
   async function send() {
@@ -65,6 +73,31 @@ export default function MeetingRoomPanel({ initialRoom }: { initialRoom: Room })
   async function closeRoom() {
     const updated = await api.closeMeeting(room.id);
     setRoom(updated);
+  }
+
+  async function summarize() {
+    setSummarizing(true);
+    setTaskCreated(null);
+    try {
+      const draftResult = await api.summarizeMeeting(room.id);
+      setTaskDraft({ ...draftResult, agentId: room.participants[0]?.agent.id ?? "" });
+    } finally {
+      setSummarizing(false);
+    }
+  }
+
+  async function createTask() {
+    if (!taskDraft || !taskDraft.title.trim() || !taskDraft.agentId) return;
+    setCreatingTask(true);
+    try {
+      const result = await api.createTaskFromMeeting(room.id, taskDraft.agentId, taskDraft.title.trim(), taskDraft.description.trim());
+      setTaskCreated(result.taskId);
+      setTaskDraft(null);
+      const updated = await api.getMeeting(room.id);
+      setRoom(updated);
+    } finally {
+      setCreatingTask(false);
+    }
   }
 
   return (
@@ -98,6 +131,58 @@ export default function MeetingRoomPanel({ initialRoom }: { initialRoom: Room })
           </div>
         ))}
       </div>
+
+      {room.messages.length > 0 && (
+        <div className={styles.createCard}>
+          {!taskDraft ? (
+            <>
+              <button className={styles.linkButton} disabled={summarizing} onClick={summarize} style={{ textAlign: "left" }}>
+                {summarizing ? "Merangkum…" : "📋 Rangkum rapat ini & jadikan Task"}
+              </button>
+              {taskCreated && <p className={styles.participants}>✅ Task dibuat (#{taskCreated.slice(-6)}) - bisa dipantau di Task Board.</p>}
+            </>
+          ) : (
+            <>
+              <p className={styles.participants}>Draft task dari hasil rapat - tinjau/edit dulu sebelum dibuat:</p>
+              <input
+                className={styles.textInput}
+                value={taskDraft.title}
+                onChange={(e) => setTaskDraft((d) => (d ? { ...d, title: e.target.value } : d))}
+                placeholder="Judul task"
+              />
+              <textarea
+                className={styles.composerBox}
+                style={{ minHeight: 90 }}
+                value={taskDraft.description}
+                onChange={(e) => setTaskDraft((d) => (d ? { ...d, description: e.target.value } : d))}
+                placeholder="Deskripsi task"
+              />
+              <label className={styles.participants}>
+                Tugaskan ke:{" "}
+                <select
+                  value={taskDraft.agentId}
+                  onChange={(e) => setTaskDraft((d) => (d ? { ...d, agentId: e.target.value } : d))}
+                  style={{ background: "#0b1420", color: "#e8edf2", border: "1px solid #1c2b3a", borderRadius: 6, padding: "4px 8px" }}
+                >
+                  {room.participants.map((p) => (
+                    <option key={p.agent.id} value={p.agent.id}>
+                      {p.agent.displayName}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div style={{ display: "flex", gap: 10 }}>
+                <button className={styles.primaryButton} disabled={creatingTask || !taskDraft.title.trim()} onClick={createTask}>
+                  {creatingTask ? "Membuat…" : "Buat Task"}
+                </button>
+                <button className={styles.linkButton} onClick={() => setTaskDraft(null)}>
+                  Batal
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {isActive ? (
         <div className={styles.composer}>

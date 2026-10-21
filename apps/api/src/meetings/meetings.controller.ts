@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
 import { MeetingsService } from "./meetings.service";
-import { CreateMeetingRoomDto, InviteToMeetingDto, SendMeetingMessageDto } from "./dto";
+import { CreateMeetingRoomDto, CreateTaskFromSummaryDto, InviteToMeetingDto, SendMeetingMessageDto } from "./dto";
 
 @Controller("meetings")
 export class MeetingsController {
@@ -34,5 +34,15 @@ export class MeetingsController {
 
   @Post(":id/close") close(@Param("id") id: string) {
     return this.service.close(id);
+  }
+
+  /** "Dirangkum dulu dari hasil rapat" - draft title+description from the transcript so far; nothing is created yet. */
+  @Post(":id/summarize") summarize(@Param("id") id: string) {
+    return this.service.summarize(id);
+  }
+
+  /** "Lalu dijadikan task" - Director-approved summary becomes a real Task assigned to the chosen participant. */
+  @Post(":id/create-task") createTask(@Param("id") id: string, @Body() dto: CreateTaskFromSummaryDto) {
+    return this.service.createTaskFromSummary(id, dto.agentId, dto.title, dto.description);
   }
 }

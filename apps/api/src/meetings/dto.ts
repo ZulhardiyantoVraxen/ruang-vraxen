@@ -17,3 +17,9 @@ export class InviteToMeetingDto {
 export class ListMeetingRoomsDto {
   @IsOptional() @IsString() status?: string;
 }
+
+export class CreateTaskFromSummaryDto {
+  @IsString() @MinLength(1) agentId!: string;
+  @IsString() @MinLength(1) title!: string;
+  @IsString() @MinLength(1) description!: string;
+}
