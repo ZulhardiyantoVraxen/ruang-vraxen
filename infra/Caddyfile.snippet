@@ -11,5 +11,12 @@
 # subdomain terpisah untuk api kecuali nanti mau dipakai dari luar (integrasi eksternal),
 # baru tambahkan DNS record + block Caddy terpisah untuk itu.
 coworking.vraxen-group.com {
+    # "Pakai socket biar realtime" - socket.io's default client path, routed
+    # straight to the api container so the WebSocket upgrade never has to
+    # pass through Next's own rewrite proxy (web:3000), which isn't
+    # guaranteed to pass an Upgrade header through cleanly in standalone mode.
+    @socketio path /socket.io/*
+    reverse_proxy @socketio 127.0.0.1:4000
+
     reverse_proxy 127.0.0.1:3000
 }

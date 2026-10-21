@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { io, type Socket } from "socket.io-client";
 import { api } from "@/lib/api";
 import { AttachmentPicker, PendingAttachment } from "../../components/AttachmentPicker";
 import { ReleaseAttachmentActions } from "../../components/ReleaseAttachmentAction";
@@ -30,6 +31,15 @@ function formatTime(iso: string) {
     );
   } catch {
     return iso;
+  }
+}
+
+/** Just "14:32" - the small per-bubble clock, like WhatsApp. */
+function formatClock(iso: string) {
+  try {
+    return new Intl.DateTimeFormat("id-ID", { hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
+  } catch {
+    return "";
   }
 }
 
@@ -86,6 +96,37 @@ export default function MeetingRoomPanel({ initialRoom }: { initialRoom: Room })
 
   const isActive = room.status === "ACTIVE";
 
+  // "Pakai socket biar realtime" - every new message (Director's own and
+  // each agent's reply) is pushed the instant it's persisted, to every
+  // connected client/tab watching this room, not just the one that sent it.
+  // connectedRef backs the polling fallback in send() below: only falls
+  // back to polling when the socket genuinely isn't connected.
+  const connectedRef = useRef(false);
+  useEffect(() => {
+    const socket: Socket = io({ path: "/socket.io" });
+    const roomChannel = `meeting:${room.id}`;
+
+    socket.on("connect", () => {
+      connectedRef.current = true;
+      socket.emit("join", roomChannel);
+    });
+    socket.on("disconnect", () => {
+      connectedRef.current = false;
+    });
+    socket.on("message", (incoming: Message) => {
+      setRoom((prev) => ({ ...prev, messages: mergeMessages(prev.messages, [incoming]) }));
+    });
+    socket.on("failure", (f: { agentId: string; agentName: string; reason: string }) => {
+      setFailures((prev) => [...prev.filter((x) => x.agentId !== f.agentId), f]);
+    });
+
+    return () => {
+      socket.emit("leave", roomChannel);
+      socket.disconnect();
+      connectedRef.current = false;
+    };
+  }, [room.id]);
+
   // While a send is in flight, show who's still thinking - shrinks live as
   // polling (see send() below) brings in each agent's reply one by one.
   const lastDirectorIdx = room.messages.map((m) => m.senderType).lastIndexOf("DIRECTOR");
@@ -103,22 +144,21 @@ export default function MeetingRoomPanel({ initialRoom }: { initialRoom: Room })
     const attachmentIds = attachments.map((a) => a.id);
     setAttachments([]);
 
-    // "Tidak realtime, harus refresh dulu baru keluar balasan" - one message
-    // makes EVERY participant reply in turn (one model call each,
-    // sequentially), so the POST below can take a while to fully resolve.
-    // Each reply is persisted to the DB as soon as that agent finishes, not
-    // only once the whole round is done - so poll the room's own messages
-    // while we wait and merge in whatever has already landed, instead of
-    // leaving the transcript looking frozen until the single big response
-    // finally comes back.
-    const pollId = setInterval(async () => {
-      try {
-        const fresh = await api.getMeeting(room.id);
-        setRoom((prev) => ({ ...prev, messages: mergeMessages(prev.messages, fresh.messages) }));
-      } catch {
-        // transient - next tick (or the final await below) will catch up
-      }
-    }, 1500);
+    // Each reply is persisted to the DB (and pushed over the socket above)
+    // as soon as that agent finishes, not only once the whole round is
+    // done. The socket is the primary path; this polling is only a backup
+    // for the rare case the socket genuinely isn't connected, so the
+    // transcript still doesn't just sit frozen for the whole round.
+    const pollId = connectedRef.current
+      ? null
+      : setInterval(async () => {
+          try {
+            const fresh = await api.getMeeting(room.id);
+            setRoom((prev) => ({ ...prev, messages: mergeMessages(prev.messages, fresh.messages) }));
+          } catch {
+            // transient - next tick (or the final await below) will catch up
+          }
+        }, 1500);
 
     try {
       const result = await api.sendMeetingMessage(room.id, content, attachmentIds);
@@ -127,7 +167,7 @@ export default function MeetingRoomPanel({ initialRoom }: { initialRoom: Room })
     } catch {
       setDraft(content); // let the Director just retry
     } finally {
-      clearInterval(pollId);
+      if (pollId) clearInterval(pollId);
       setSending(false);
     }
   }
@@ -180,20 +220,24 @@ export default function MeetingRoomPanel({ initialRoom }: { initialRoom: Room })
       <p className={styles.participants}>Peserta: {room.participants.map((p) => p.agent.displayName).join(", ")}</p>
 
       <div className={styles.transcript}>
-        {room.messages.length === 0 && <p className={styles.empty}>Belum ada pesan. Mulai rapat dengan mengetik di bawah.</p>}
-        {room.messages.map((m) => (
-          <div key={m.id} className={`${styles.bubble} ${m.senderType === "DIRECTOR" ? styles.bubbleDirector : styles.bubbleAgent}`}>
-            {m.senderType === "AGENT" && <span className={styles.bubbleMeta}>{m.senderAgent?.displayName}</span>}
-            {m.content}
-            <ReleaseAttachmentActions content={m.content} />
-          </div>
-        ))}
+        {/* Pesan terbaru selalu paling atas - urutan dibalik (bukan gaya WhatsApp yang di bawah),
+            jadi status "sedang dikirim" dan daftar peserta yang belum membalas juga ditaruh paling
+            atas, karena itulah hal paling baru yang sedang terjadi di rapat ini. */}
         {pendingParticipants.length > 0 && (
           <p className={styles.participants}>⏳ Menunggu balasan: {pendingParticipants.map((p) => p.agent.displayName).join(", ")}</p>
         )}
         {failures.map((f) => (
           <div key={f.agentId} className={styles.failure}>
             {f.agentName} sedang tidak bisa merespons (model sibuk/limit) - coba kirim ulang sebentar lagi.
+          </div>
+        ))}
+        {room.messages.length === 0 && <p className={styles.empty}>Belum ada pesan. Mulai rapat dengan mengetik di bawah.</p>}
+        {[...room.messages].reverse().map((m) => (
+          <div key={m.id} className={`${styles.bubble} ${m.senderType === "DIRECTOR" ? styles.bubbleDirector : styles.bubbleAgent}`}>
+            {m.senderType === "AGENT" && <span className={styles.bubbleMeta}>{m.senderAgent?.displayName}</span>}
+            {m.content}
+            <ReleaseAttachmentActions content={m.content} />
+            <span className={styles.bubbleTime}>{formatClock(m.createdAt)}</span>
           </div>
         ))}
       </div>

@@ -6,6 +6,7 @@ import { TasksService } from "../tasks/tasks.service";
 import { UploadsService } from "../uploads/uploads.service";
 import { LinkReaderService } from "../common/link-reader.service";
 import { ObjectStorageService } from "../storage/object-storage.service";
+import { RealtimeGateway } from "../realtime/realtime.gateway";
 import { GoogleSheetsClient } from "@platform/shared";
 import { MeetingRoomType, MeetingRoomStatus, Prisma } from "@prisma/client";
 
@@ -63,6 +64,7 @@ export class MeetingsService {
     private readonly uploads: UploadsService,
     private readonly linkReader: LinkReaderService,
     private readonly storage: ObjectStorageService,
+    private readonly realtime: RealtimeGateway,
   ) {}
 
   /**
@@ -232,11 +234,14 @@ export class MeetingsService {
     if (room.status !== "ACTIVE") throw new BadRequestException("Rapat ini sudah ditutup");
 
     const storedContent = `${content}${this.uploads.noteForIds(attachmentIds)}`;
-    const created = [
-      await this.prisma.meetingMessage.create({
-        data: { meetingRoomId: roomId, senderType: "DIRECTOR", content: storedContent },
-      }),
-    ];
+    const directorMessage = await this.prisma.meetingMessage.create({
+      data: { meetingRoomId: roomId, senderType: "DIRECTOR", content: storedContent },
+    });
+    const created = [directorMessage];
+    // "Pakai socket biar realtime" - pushed the instant it's persisted, to
+    // every connected client (including other tabs/viewers), not just the
+    // one that sent it - see RealtimeGateway's own header comment.
+    this.realtime.emit(`meeting:${roomId}`, "message", { ...directorMessage, senderAgent: null });
     const failures: { agentId: string; agentName: string; reason: string }[] = [];
 
     // Full attachment content (+ any URL typed into the message) is only
@@ -295,6 +300,7 @@ Berikan tanggapanmu sebagai ${agent.displayName} terhadap perkembangan terbaru d
           include: { senderAgent: true },
         });
         created.push(reply);
+        this.realtime.emit(`meeting:${roomId}`, "message", reply);
 
         await this.usage
           .record({
@@ -309,7 +315,9 @@ Berikan tanggapanmu sebagai ${agent.displayName} terhadap perkembangan terbaru d
       } catch (err) {
         const reason = err instanceof Error ? err.message : "Gagal menghubungi model";
         this.logger.error(`Meeting ${roomId}: agent ${agent.displayName} gagal merespons (seluruh fallback chain): ${reason}`);
-        failures.push({ agentId: agent.id, agentName: agent.displayName, reason });
+        const failure = { agentId: agent.id, agentName: agent.displayName, reason };
+        failures.push(failure);
+        this.realtime.emit(`meeting:${roomId}`, "failure", failure);
       }
     }
 
